@@ -22,6 +22,20 @@ handoff and review. Concurrent updates use revisions: a stale edit returns HTTP
 at a time. The board receives live updates and records persistent activity.
 Private chat history remains private; adding workspace members does not share it.
 
+## Try a demo project
+
+Click **Start demo project** to create a separate workspace containing a shipping
+calculator, three tests (two intentionally failing), and two tasks. Open the ready
+bug-fix task and start its builder, then run the reviewer and approve completion.
+The second task adds an edge-case test. No external account or dependency download
+is needed. Creating the files requires Docker and `collaboration.image`; agent runs
+also require a native model provider. Nothing starts an agent automatically.
+
+Only users allowed to create workspaces can create demos. Each click creates a new
+workspace; existing files and tasks are preserved. Files are initialized before
+the workspace and its tasks are committed together. Failed initialization is not
+published on the board.
+
 ## Discuss work while agents run
 
 Members can add comments while a builder or reviewer is running. Comments are
@@ -230,6 +244,7 @@ All board endpoints use the same Fathom bearer token as chat.
 | Method | Path after `/api/v1/board` | Body / result |
 | --- | --- | --- |
 | GET | empty | Member workspaces, available model names, run setup message, user ID |
+| POST | `/demo` | `{}` → a new demo workspace with starter files and tasks |
 | POST | empty | `{ "name": "Team" }` → workspace |
 | GET | `/{workspace}` | Tasks, members, recent activity, non-secret connections |
 | POST | `/{workspace}/members` | `{ "userId": "…", "role": "member" }`; empty role removes |

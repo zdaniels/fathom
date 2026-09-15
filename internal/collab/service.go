@@ -20,6 +20,7 @@ type Service struct {
 	DeleteSecret         func(string)
 	ConnectionClient     *http.Client
 	connectionMu         sync.Mutex
+	projectMu            sync.Mutex
 	Store                *Store
 	Runner               *Runner
 	Auth                 func(*http.Request) (string, error)
@@ -115,6 +116,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fail(w, 405, errors.New("GET or POST required"))
+		return
+	}
+	if path == "demo" {
+		s.createDemo(w, r, user)
 		return
 	}
 	workspace := parts[0]

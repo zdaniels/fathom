@@ -670,6 +670,19 @@
   };
   $("connection-check").onclick = () => connectionAction("check");
   $("connection-disable").onclick = () => connectionAction("disable");
+  $("start-demo").onclick = async () => {
+    $("start-demo").disabled = true;
+    $("status").textContent = "Creating demo project…";
+    try {
+      const w = await api("/demo", {});
+      state.workspace = w.id;
+      state.task = null;
+      $("task-dialog").close();
+      await init();
+      $("status").textContent = "Demo ready. Open ‘Fix free shipping at $50’ and start the builder.";
+    } catch (e) { report(e); }
+    finally { $("start-demo").disabled = false; }
+  };
   $("workspace-form").onsubmit = async (e) => {
     e.preventDefault();
     try {
