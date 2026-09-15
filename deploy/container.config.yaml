@@ -1,0 +1,10 @@
+# Copy and customize this file. Provider credentials belong in the environment
+# or vault, not in this checked-in example.
+host: 0.0.0.0
+port: 8790
+dataDir: /data
+policyFile: /etc/fathom/policy.yaml
+llm:
+  provider: ollama
+  model: llama3.2
+  baseUrl: http://host.docker.internal:11434

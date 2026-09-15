@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zdaniels/fathom/internal/brandenv"
 	"os"
+	"os/exec"
 	"time"
 )
 
@@ -146,8 +148,29 @@ func (s *Sandbox) Invoke(ctx context.Context, inv SandboxInvocation) (interface{
 
 	// Launch through the OS sandbox when isolation is configured. The runner
 	// inherits the stripped env regardless of whether a sandbox wraps it.
-	cmd := s.isolation.wrap(cctx, bin, binArgs)
-	cmd.Env = env
+	var cmd *exec.Cmd
+	mode := brandenv.Get("FATHOM_SKILL_SANDBOX")
+	switch mode {
+	case "required":
+		var err error
+		cmd, err = s.isolatedCommand(cctx, &inv, binArgs)
+		if err != nil {
+			return nil, err
+		}
+		// Killing the Docker client does not stop its container. Explicitly
+		// remove the named container on timeout, cancellation, or completion.
+		name := cmd.Args[4]
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = exec.CommandContext(cleanup, cmd.Path, "rm", "--force", name).Run()
+		}()
+	case "", "1", "trusted":
+		cmd = s.isolation.wrap(cctx, bin, binArgs)
+		cmd.Env = env
+	default:
+		return nil, fmt.Errorf("unknown FATHOM_SKILL_SANDBOX mode %q", mode)
+	}
 
 	stdin, _ := json.Marshal(struct {
 		EntryPoint   string            `json:"entryPoint"`
@@ -171,6 +194,9 @@ func (s *Sandbox) Invoke(ctx context.Context, inv SandboxInvocation) (interface{
 		return nil, fmt.Errorf("skill execution timed out after %dms", s.timeoutMs)
 	}
 
+	if err != nil {
+		return nil, fmt.Errorf("skill process failed: %w: %s", err, truncate(stderr.String(), 500))
+	}
 	if stdout.Len() == 0 {
 		if err != nil {
 			return nil, fmt.Errorf("skill produced no output (%v): %s", err, truncate(stderr.String(), 500))

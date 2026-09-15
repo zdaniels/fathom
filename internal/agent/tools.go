@@ -145,6 +145,9 @@ func (r *ToolRegistry) Execute(ctx context.Context, call llm.ToolCallRequest, se
 		"tool":   call.Name,
 		"params": sanitizeParamsForLog(call.Arguments),
 	}, policyEval.Decision)
+	if err := r.audit.Err(); err != nil {
+		return ToolResult{CallID: call.ID, Success: false, Error: "Audit storage unavailable; tool execution stopped"}
+	}
 	if policyEval.Decision == types.PolicyDeny {
 		slog.Warn("tool call denied by policy", "tool", call.Name, "rule", policyEval.MatchedRule)
 		return ToolResult{CallID: call.ID, Success: false,

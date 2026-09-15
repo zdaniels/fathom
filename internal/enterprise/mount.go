@@ -1,11 +1,14 @@
 package enterprise
 
 import (
+	"database/sql"
 	"errors"
 	"github.com/zdaniels/fathom/internal/brandenv"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zdaniels/fathom/internal/auth"
 	"github.com/zdaniels/fathom/internal/enterprise/core"
@@ -17,6 +20,7 @@ import (
 // Mounted is what Mount returns when the caller wants references to the
 // individual managers (e.g. for boot banner output).
 type Mounted struct {
+	DB         *sql.DB
 	RBAC       *core.RBACManager
 	Tenants    *core.TenantManager
 	Compliance *core.Exporter
@@ -41,15 +45,27 @@ func Mount(gw *gateway.Gateway, cfg types.Config, mesh *security.Mesh) (*Mounted
 		return nil, errors.New("Mount requires a gateway and security mesh")
 	}
 
-	rbac := core.NewRBACManager()
-	tenants := core.NewTenantManager()
+	rbac, tenants, db, err := core.OpenState(filepath.Join(cfg.DataDir, "enterprise.db"))
+	if err != nil {
+		return nil, err
+	}
+	success := false
+	defer func() {
+		if !success {
+			db.Close()
+		}
+	}()
 	compliance := core.NewExporter()
 
 	bootstrap := brandenv.Get("FATHOM_BOOTSTRAP_ADMIN")
 	if bootstrap == "" {
 		bootstrap = "admin"
 	}
-	rbac.AssignRole(bootstrap, core.RoleAdmin, "bootstrap", "")
+	if len(rbac.ListAssignments("")) == 0 {
+		if err := rbac.AssignRole(bootstrap, core.RoleAdmin, "bootstrap", ""); err != nil {
+			return nil, err
+		}
+	}
 	slog.Info("bootstrap admin role assigned", "userId", bootstrap)
 
 	authFn := func(r *http.Request) (string, error) {
@@ -74,31 +90,26 @@ func Mount(gw *gateway.Gateway, cfg types.Config, mesh *security.Mesh) (*Mounted
 
 	// Belt-and-suspenders hardening for the admin surface, from
 	// cfg.Enterprise.Admin (+ FANTAZM_ADMIN_ALLOW_CIDRS for the allow-list).
+	var cidrErr error
 	rateLimit := 60 // default: 60 admin req/IP/min
 	if ac := adminCfg(cfg); ac != nil {
 		cidrs := ac.AllowCIDRs
 		if env := brandenv.Get("FATHOM_ADMIN_ALLOW_CIDRS"); env != "" {
 			cidrs = append(cidrs, strings.Split(env, ",")...)
 		}
-		admin.AllowNets = parseCIDRs(cidrs)
+		admin.AllowNets, cidrErr = parseCIDRs(cidrs)
 		if ac.RateLimitPerMin != 0 {
 			rateLimit = ac.RateLimitPerMin // negative disables
 		}
 		admin.RequireStepUp = ac.RequireStepUp
 	} else if env := brandenv.Get("FATHOM_ADMIN_ALLOW_CIDRS"); env != "" {
-		admin.AllowNets = parseCIDRs(strings.Split(env, ","))
+		admin.AllowNets, cidrErr = parseCIDRs(strings.Split(env, ","))
+	}
+	if cidrErr != nil {
+		return nil, cidrErr
 	}
 	admin.Limiter = newAdminRateLimiter(rateLimit)
-	// Step-up verifier: re-authenticate the supplied token and confirm it
-	// still holds admin (ManageUsers) right now.
-	admin.StepUpAuth = func(token string) (string, bool) {
-		res, err := gw.Auth.Authenticate(token)
-		if err != nil {
-			return "", false
-		}
-		isAdmin := rbac.HasPermission(res.UserID, "", func(p core.Permissions) bool { return p.ManageUsers })
-		return res.UserID, isAdmin
-	}
+
 	if admin.RequireStepUp || len(admin.AllowNets) > 0 {
 		slog.Info("admin surface hardening enabled",
 			"ipAllowList", len(admin.AllowNets) > 0,
@@ -108,6 +119,23 @@ func Mount(gw *gateway.Gateway, cfg types.Config, mesh *security.Mesh) (*Mounted
 	}
 
 	gw.SetExtensionHandler(admin.Handle)
+	authorize := func(user string) bool {
+		return rbac.HasPermission(user, "", func(p core.Permissions) bool { return p.ExecuteTools })
+	}
+	gw.SetExecutionAuth(authorize)
+	mesh.Policy.SetUserAuthorizer(authorize)
+	gw.SetSettingsGuard(func(w http.ResponseWriter, r *http.Request) bool {
+		if !admin.Harden(w, r) {
+			return false
+		}
+		if r.Method == http.MethodPatch || r.Method == http.MethodPost {
+			if !admin.stepUpOK(r) {
+				respJSON(w, 403, map[string]string{"error": "Fresh step-up authentication required"})
+				return false
+			}
+		}
+		return true
+	})
 
 	// Settings page write-gate: in team/enterprise mode only admins (the
 	// ManagePolicies permission) may modify settings. Everyone else gets a
@@ -117,24 +145,38 @@ func Mount(gw *gateway.Gateway, cfg types.Config, mesh *security.Mesh) (*Mounted
 		return rbac.HasPermission(userID, "", func(p core.Permissions) bool { return p.ManagePolicies })
 	})
 
-	mounted := &Mounted{RBAC: rbac, Tenants: tenants, Compliance: compliance, Admin: admin}
+	mounted := &Mounted{DB: db, RBAC: rbac, Tenants: tenants, Compliance: compliance, Admin: admin}
 	if cfg.Mode == types.ModeEnterprise && cfg.Enterprise != nil && cfg.Enterprise.SSO != nil {
 		sso := NewSSOManager()
-		redirect := "http://" + cfg.Host + ":" + portStr(cfg.Port) + "/api/v1/sso/callback"
-		sso.Configure(OIDCConfig{
+		if err := sso.Configure(OIDCConfig{
 			Issuer:       cfg.Enterprise.SSO.Issuer,
 			ClientID:     cfg.Enterprise.SSO.ClientID,
 			ClientSecret: cfg.Enterprise.SSO.ClientSecret,
-			RedirectURI:  redirect,
-		})
+			RedirectURI:  cfg.Enterprise.SSO.RedirectURI,
+		}); err != nil {
+			return nil, err
+		}
 		mounted.SSO = sso
+		admin.StepUpAuth = sso.ConsumeStepUp
+		gw.SetExtensionHandler(func(w http.ResponseWriter, r *http.Request) bool {
+			if sso.Handle(w, r, func(user string) (string, error) { return gw.Auth.CreateSessionToken(user, time.Hour) }, func(user string) bool {
+				return rbac.HasPermission(user, "", func(p core.Permissions) bool { return p.ManageUsers })
+			}) {
+				return true
+			}
+			return admin.Handle(w, r)
+		})
 		slog.Info("SSO/OIDC enabled", "issuer", cfg.Enterprise.SSO.Issuer)
+	}
+	if admin.RequireStepUp && mounted.SSO == nil {
+		return nil, errors.New("requireStepUp requires configured OIDC SSO for fresh authentication")
 	}
 	slog.Info("enterprise features mounted",
 		"mode", cfg.Mode,
 		"sso", mounted.SSO != nil,
 		"routes", "/api/v1/admin/*, /api/v1/audit",
 	)
+	success = true
 	return mounted, nil
 }
 

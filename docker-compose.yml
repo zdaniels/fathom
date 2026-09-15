@@ -1,27 +1,23 @@
-version: "3.8"
-
 services:
   fathom:
     build: .
-    container_name: fathom
     restart: unless-stopped
     ports:
-      - "8790:8790"
+      - "127.0.0.1:8790:8790"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - fathom-data:/data
-      - ./fathom.policy.yaml:/app/fathom.policy.yaml:ro
-    environment:
-      - FANTAZM_HOST=0.0.0.0
-      - FANTAZM_PORT=8790
-      - FANTAZM_DATA_DIR=/data
-      - FANTAZM_LOG_LEVEL=info
+      - ./deploy/container.config.yaml:/etc/fathom/config.yaml:ro
+      - ./deploy/container.policy.yaml:/etc/fathom/policy.yaml:ro
+    # For hosted models: add an env_file or individual environment entries.
+    # Do not mount the host Docker socket or host home into the agent container.
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     read_only: true
     tmpfs:
-      - /tmp:size=100M
-
+      - /tmp:rw,nosuid,nodev,size=100m
 volumes:
   fathom-data:

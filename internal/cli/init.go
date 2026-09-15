@@ -219,7 +219,7 @@ Discovery order at run time:
 			// SSO/OIDC values rather than placeholders the user
 			// will forget to fix.
 			var teamName, adminEmail string
-			var ssoIssuer, ssoClient, ssoSecret string
+			var ssoIssuer, ssoClient, ssoSecret, ssoRedirect string
 			if mode == "team" || mode == "enterprise" {
 				teamName = ask("Team name [Fathom Team]: ")
 				if teamName == "" {
@@ -230,7 +230,8 @@ Discovery order at run time:
 			if mode == "enterprise" {
 				ssoIssuer = ask("OIDC issuer URL (e.g. https://login.example.com): ")
 				ssoClient = ask("OIDC client ID: ")
-				ssoSecret = ask("OIDC client secret (leave blank to set later): ")
+				ssoSecret = ask("OIDC client secret (leave blank for a public client): ")
+				ssoRedirect = ask("OIDC redirect URI (exact registered /api/v1/sso/callback URL): ")
 			}
 
 			// config.yaml
@@ -252,29 +253,10 @@ Discovery order at run time:
 					"teamName":   teamName,
 					"adminEmail": adminEmail,
 				}
-				if mode == "enterprise" {
-					// Use real values when provided; fall back to
-					// placeholders for fields the user skipped so they
-					// can fill them in later. Loud comment in the file
-					// so they notice on first edit.
-					issuer := ssoIssuer
-					if issuer == "" {
-						issuer = "REPLACE_ME_https://login.example.com"
-					}
-					client := ssoClient
-					if client == "" {
-						client = "REPLACE_ME_client_id"
-					}
-					secret := ssoSecret
-					if secret == "" {
-						secret = "REPLACE_ME_client_secret"
-					}
-					ent["sso"] = map[string]interface{}{
-						"issuer":       issuer,
-						"clientId":     client,
-						"clientSecret": secret,
-					}
+				if mode == "enterprise" && ssoIssuer != "" && ssoClient != "" && ssoRedirect != "" {
+					ent["sso"] = map[string]interface{}{"issuer": ssoIssuer, "clientId": ssoClient, "clientSecret": ssoSecret, "redirectUri": ssoRedirect}
 				}
+
 				cfg["enterprise"] = ent
 			}
 			// Pick destination root. --global writes to ~/.config/fathom/;
@@ -407,7 +389,7 @@ Discovery order at run time:
 				fmt.Fprintln(out)
 				ui.Hint(out, "Next: run 'fathom start' — admin token prints once on first boot.")
 			default:
-				ui.KV(out, "enterprise", "SSO + RBAC + compliance wired")
+				ui.KV(out, "enterprise", "RBAC + reports; configure OIDC to enable SSO")
 				fmt.Fprintln(out)
 				ui.Hint(out, "Configure OIDC issuer/clientId/clientSecret in fathom.config.yaml.")
 			}

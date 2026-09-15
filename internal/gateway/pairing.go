@@ -39,6 +39,10 @@ func (g *Gateway) handlePairStart(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if res.Method == "sso" {
+		jsonError(w, 403, "SSO sessions cannot create persistent device tokens; sign in on each device")
+		return
+	}
 	pc, err := g.Pairing.Generate(res.UserID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())

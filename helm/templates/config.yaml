@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-fathom-config
+data:
+  config.yaml: |
+    {{- $cfg := deepCopy .Values.config }}
+    {{- $_ := set $cfg "host" "0.0.0.0" }}
+    {{- $_ := set $cfg "port" (int .Values.service.port) }}
+    {{- $_ := set $cfg "dataDir" "/data" }}
+    {{- $_ := set $cfg "policyFile" "/etc/fathom/policy/policy.yaml" }}
+    {{- toYaml $cfg | nindent 4 }}
+  policy.yaml: |
+    {{- toYaml .Values.policy | nindent 4 }}

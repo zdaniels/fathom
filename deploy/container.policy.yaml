@@ -1,0 +1,7 @@
+version: 1
+defaults:
+  network: deny
+  filesystem: read-only
+  shell: deny
+  secrets: isolated
+rules: []

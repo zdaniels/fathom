@@ -406,6 +406,9 @@ func ensureMessages(m []threads.Message) []threads.Message {
 // non-SSE clients still get a synchronous answer) AND fans events out
 // to every device subscribed via /stream.
 func (g *Gateway) serveThreadSendMessage(w http.ResponseWriter, r *http.Request, t threads.Thread, authRes auth.Result) {
+	if !g.executionAllowed(w, authRes.UserID) {
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "body unreadable")

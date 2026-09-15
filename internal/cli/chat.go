@@ -102,21 +102,8 @@ func runChatSession(cmd *cobra.Command, cfgPath, threadIDFlag string, resumeFlag
 		}
 	}()
 
-	// Takeover: when enabled, an in-process chat must behave like the gateway
-	// — every turn goes to the external coding agent (Claude Code / Codex),
-	// the local routed agent is bypassed. We swap the handler and clear
-	// HandlerN/NU so runAgent's `/model`-aware path can't route around it, and
-	// rewrite the banner description so the splash reflects takeover instead of
-	// advertising local models that never see a message.
-	if cfg.Takeover != nil && cfg.Takeover.Enabled {
-		th, terr := agentfactory.BuildTakeoverHandler(cfg)
-		if terr != nil {
-			return fmt.Errorf("takeover mode: %w", terr)
-		}
-		result.Handler = th
-		result.HandlerN = nil
-		result.HandlerNU = nil
-		result.Description = "takeover → " + agentfactory.TakeoverDesc(cfg.Takeover)
+	if result.Security != nil {
+		defer result.Security.Audit.Close()
 	}
 
 	cwd, _ := os.Getwd()

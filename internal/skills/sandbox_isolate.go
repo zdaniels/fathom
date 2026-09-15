@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+// Optional hardening for trusted skill subprocesses. For untrusted code use
+// FATHOM_SKILL_SANDBOX=required (sandbox_required.go), which fails closed.
 // OS-level isolation for skill subprocesses. The egress proxy already keeps
 // skills from seeing raw secrets, but a skill is still arbitrary code running
 // as the user — without OS enforcement it could read the encrypted vault and

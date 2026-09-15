@@ -6,6 +6,8 @@
 package core
 
 import (
+	"database/sql"
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -61,6 +63,7 @@ type Assignment struct {
 
 // RBACManager owns the live role map.
 type RBACManager struct {
+	db          *sql.DB
 	mu          sync.RWMutex
 	assignments map[string]Assignment
 }
@@ -72,24 +75,35 @@ func NewRBACManager() *RBACManager {
 }
 
 func keyFor(userID, tenantID string) string {
-	if tenantID == "" {
-		return userID
-	}
-	return tenantID + ":" + userID
+	b, _ := json.Marshal([]string{tenantID, userID})
+	return string(b)
 }
 
 // AssignRole sets userID's role. Records who did the assignment for audit.
-func (r *RBACManager) AssignRole(userID string, role Role, assignedBy, tenantID string) {
-	r.mu.Lock()
-	r.assignments[keyFor(userID, tenantID)] = Assignment{
-		UserID: userID, Role: role, TenantID: tenantID,
-		AssignedBy: assignedBy, AssignedAt: time.Now().UTC(),
+func (r *RBACManager) AssignRole(userID string, role Role, assignedBy, tenantID string) error {
+	if err := validAssignment(userID, role, tenantID); err != nil {
+		return err
 	}
+	a := Assignment{UserID: userID, Role: role, TenantID: tenantID, AssignedBy: assignedBy, AssignedAt: time.Now().UTC()}
+	if r.db != nil {
+		return r.saveAssignment(a)
+	}
+	r.mu.Lock()
+	r.assignments[keyFor(userID, tenantID)] = a
 	r.mu.Unlock()
+	return nil
 }
 
 // RemoveRole drops the assignment.
 func (r *RBACManager) RemoveRole(userID, tenantID string) bool {
+	if r.db != nil {
+		res, err := r.db.Exec("DELETE FROM roles WHERE user_id=? AND tenant_id=?", userID, tenantID)
+		if err != nil {
+			return false
+		}
+		n, _ := res.RowsAffected()
+		return n > 0
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := keyFor(userID, tenantID)
@@ -102,6 +116,17 @@ func (r *RBACManager) RemoveRole(userID, tenantID string) bool {
 
 // GetRole returns the assigned role; defaults to viewer (the safest fallback).
 func (r *RBACManager) GetRole(userID, tenantID string) Role {
+	if r.db != nil {
+		var b []byte
+		var a Assignment
+		if err := r.db.QueryRow("SELECT record FROM roles WHERE user_id=? AND tenant_id=?", userID, tenantID).Scan(&b); err != nil {
+			return RoleViewer
+		}
+		if json.Unmarshal(b, &a) != nil {
+			return RoleViewer
+		}
+		return a.Role
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if a, ok := r.assignments[keyFor(userID, tenantID)]; ok {
@@ -122,6 +147,19 @@ func (r *RBACManager) HasPermission(userID, tenantID string, pred func(Permissio
 
 // ListAssignments returns all assignments, optionally filtered by tenant.
 func (r *RBACManager) ListAssignments(tenantID string) []Assignment {
+	if r.db != nil {
+		all, err := r.storedAssignments()
+		if err != nil {
+			return nil
+		}
+		out := []Assignment{}
+		for _, a := range all {
+			if tenantID == "" || a.TenantID == tenantID {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]Assignment, 0, len(r.assignments))

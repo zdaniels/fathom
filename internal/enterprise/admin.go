@@ -51,18 +51,7 @@ func (a *AdminAPI) Handle(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	// Layer: IP allow-list. When configured, anything outside the allowed
-	// ranges gets a 404 — the admin surface is invisible to off-network
-	// callers rather than advertising that it exists.
-	ip := clientIP(r)
-	if len(a.AllowNets) > 0 && !ipAllowed(a.AllowNets, ip) {
-		respJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
-		return true
-	}
-
-	// Layer: per-IP rate limit. Forecloses brute force / token abuse.
-	if !a.Limiter.allow(ip) {
-		respJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Too many admin requests; slow down"})
+	if !a.Harden(w, r) {
 		return true
 	}
 
@@ -96,10 +85,19 @@ func (a *AdminAPI) Handle(w http.ResponseWriter, r *http.Request) bool {
 		// Destructive mutation → step-up gate.
 		if !a.stepUpOK(r) {
 			a.audit(userID, "assign_role", types.PolicyDeny, withReason(detail, "step_up_required"))
-			respJSON(w, http.StatusForbidden, map[string]string{"error": "Step-up re-authentication required: resupply a valid admin token in X-Step-Up-Token"})
+			respJSON(w, http.StatusForbidden, map[string]string{"error": "Fresh OIDC authentication required: supply its single-use stepUpToken in X-Step-Up-Token"})
 			return true
 		}
-		a.RBAC.AssignRole(body.UserID, core.Role(body.Role), userID, body.TenantID)
+		if body.TenantID != "" {
+			if _, ok := a.Tenants.Get(body.TenantID); !ok {
+				respJSON(w, 400, map[string]string{"error": "unknown tenant"})
+				return true
+			}
+		}
+		if err := a.RBAC.AssignRole(body.UserID, core.Role(body.Role), userID, body.TenantID); err != nil {
+			respJSON(w, 400, map[string]string{"error": err.Error()})
+			return true
+		}
 		a.audit(userID, "assign_role", types.PolicyAllow, detail)
 		respJSON(w, http.StatusOK, map[string]bool{"success": true})
 
@@ -125,7 +123,7 @@ func (a *AdminAPI) Handle(w http.ResponseWriter, r *http.Request) bool {
 		detail := map[string]interface{}{"op": "create_tenant", "name": body.Name, "slug": body.Slug}
 		if !a.stepUpOK(r) {
 			a.audit(userID, "create_tenant", types.PolicyDeny, withReason(detail, "step_up_required"))
-			respJSON(w, http.StatusForbidden, map[string]string{"error": "Step-up re-authentication required: resupply a valid admin token in X-Step-Up-Token"})
+			respJSON(w, http.StatusForbidden, map[string]string{"error": "Fresh OIDC authentication required: supply its single-use stepUpToken in X-Step-Up-Token"})
 			return true
 		}
 		tt, err := a.Tenants.Create(body.Name, body.Slug, body.Config)
@@ -148,7 +146,15 @@ func (a *AdminAPI) Handle(w http.ResponseWriter, r *http.Request) bool {
 			}
 			entries = filtered
 		}
-		limit := parseIntDefault(r.URL.Query().Get("limit"), 100)
+		limit := 100
+		if raw, present := r.URL.Query()["limit"]; present {
+			n, err := strconv.Atoi(raw[0])
+			if err != nil || n < 0 || n > 10000 {
+				respJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer between 0 and 10000"})
+				return true
+			}
+			limit = n
+		}
 		if limit > len(entries) {
 			limit = len(entries)
 		}
@@ -200,11 +206,8 @@ func (a *AdminAPI) requireManageUsers(w http.ResponseWriter, userID, op string) 
 	return false
 }
 
-// stepUpOK reports whether the request satisfies the step-up requirement for
-// a destructive mutation. When RequireStepUp is off it's always true. When
-// on, the caller must present X-Step-Up-Token that re-authenticates to a
-// user who currently holds admin — sudo-style proof of live possession,
-// defeating a passively replayed session token.
+// stepUpOK consumes a fresh single-use grant bound to the same identity.
+// The verifier must not accept general-purpose gateway bearer tokens.
 func (a *AdminAPI) stepUpOK(r *http.Request) bool {
 	if !a.RequireStepUp {
 		return true
@@ -216,8 +219,9 @@ func (a *AdminAPI) stepUpOK(r *http.Request) bool {
 	if tok == "" {
 		return false
 	}
-	_, isAdmin := a.StepUpAuth(tok)
-	return isAdmin
+	stepUser, isAdmin := a.StepUpAuth(tok)
+	user, err := a.AuthFn(r)
+	return err == nil && isAdmin && stepUser == user
 }
 
 // audit writes one admin-action entry (allowed or denied) when an audit sink
@@ -270,4 +274,28 @@ func readJSON(r *http.Request, dst interface{}) error {
 		return err
 	}
 	return json.Unmarshal(body, dst)
+}
+
+// Harden applies the shared network and rate-limit boundary to sensitive routes.
+func (a *AdminAPI) Harden(w http.ResponseWriter, r *http.Request) bool {
+	if recorder, ok := a.Audit.(interface{ Err() error }); ok && recorder.Err() != nil {
+		respJSON(w, 503, map[string]string{"error": "Audit storage unavailable"})
+		return false
+	}
+	// Layer: IP allow-list. When configured, anything outside the allowed
+	// ranges gets a 404 — the admin surface is invisible to off-network
+	// callers rather than advertising that it exists.
+	ip := clientIP(r)
+	if len(a.AllowNets) > 0 && !ipAllowed(a.AllowNets, ip) {
+		respJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return false
+	}
+
+	// Layer: per-IP rate limit. Forecloses brute force / token abuse.
+	if !a.Limiter.allow(ip) {
+		respJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Too many admin requests; slow down"})
+		return false
+	}
+
+	return true
 }

@@ -1,8 +1,10 @@
 package enterprise
 
 import (
+	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,11 +31,12 @@ func clientIP(r *http.Request) string {
 
 // parseCIDRs turns a list of CIDR or bare-IP strings into matchers. A bare
 // IP (no "/") is treated as a /32 or /128. Unparseable entries are skipped.
-func parseCIDRs(entries []string) []*net.IPNet {
+func parseCIDRs(entries []string) ([]*net.IPNet, error) {
 	var out []*net.IPNet
 	for _, e := range entries {
+		e = strings.TrimSpace(e)
 		if e == "" {
-			continue
+			return nil, fmt.Errorf("empty admin CIDR entry")
 		}
 		if !hasSlash(e) {
 			if ip := net.ParseIP(e); ip != nil {
@@ -45,11 +48,13 @@ func parseCIDRs(entries []string) []*net.IPNet {
 				continue
 			}
 		}
-		if _, n, err := net.ParseCIDR(e); err == nil {
-			out = append(out, n)
+		_, n, err := net.ParseCIDR(e)
+		if err != nil {
+			return nil, fmt.Errorf("invalid admin CIDR %q: %w", e, err)
 		}
+		out = append(out, n)
 	}
-	return out
+	return out, nil
 }
 
 func hasSlash(s string) bool {

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"github.com/zdaniels/fathom/internal/brandenv"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,7 +170,7 @@ func serviceInstallCmd() *cobra.Command {
 				return err
 			}
 
-			plist := renderPlist(binPath, absWorkdir, logPath)
+			plist := renderPlist(binPath, absWorkdir, logPath, cfgPath)
 			if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 				return err
 			}
@@ -332,12 +334,22 @@ func serviceLogCmd() *cobra.Command {
 // renderPlist builds the LaunchAgent XML. We do it as a template string —
 // the plist format is stable and a real XML library would be overkill
 // for ~30 lines of static structure.
-func renderPlist(binPath, workdir, logPath string) string {
+func renderPlist(binPath, workdir, logPath string, configPaths ...string) string {
+	configPath := ""
+	if len(configPaths) > 0 {
+		configPath, _ = filepath.Abs(configPaths[0])
+	}
 	pathEnv := os.Getenv("PATH")
 	if pathEnv == "" {
 		pathEnv = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 	}
 	home, _ := os.UserHomeDir()
+	var extraEnv strings.Builder
+	for _, key := range []string{"FATHOM_MODE", "FATHOM_HOST", "FATHOM_PORT", "FATHOM_DATA_DIR", "FATHOM_WORKSPACE_ROOT", "FATHOM_POLICY", "FATHOM_SKILL_SANDBOX", "FATHOM_VAULT_PATH", "FATHOM_VAULT_KEY", "FATHOM_DEVICES_DB", "FATHOM_THREADS_DB", "FATHOM_SCHEDULE_DB", "FATHOM_TOKEN_FILE", "FATHOM_LOG_LEVEL"} {
+		if value := brandenv.Get(key); value != "" {
+			fmt.Fprintf(&extraEnv, "<key>%s</key><string>%s</string>\n", key, html.EscapeString(value))
+		}
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -348,6 +360,7 @@ func renderPlist(binPath, workdir, logPath string) string {
     <array>
         <string>%s</string>
         <string>start</string>
+        <string>%s</string>
     </array>
     <key>WorkingDirectory</key>
     <string>%s</string>
@@ -368,24 +381,18 @@ func renderPlist(binPath, workdir, logPath string) string {
         <string>%s</string>
         <key>HOME</key>
         <string>%s</string>
+        %s
     </dict>
     <key>ThrottleInterval</key>
     <integer>10</integer>
 </dict>
 </plist>
-`, launchdLabel, binPath, workdir, logPath, logPath, pathEnv, home)
+`, launchdLabel, html.EscapeString(binPath), html.EscapeString(configPath), html.EscapeString(workdir), html.EscapeString(logPath), html.EscapeString(logPath), html.EscapeString(pathEnv), html.EscapeString(home), extraEnv.String())
 }
 
 // discoverFromDir runs config discovery as if cwd were dir. Returns the
 // first config file found via the standard precedence: upward walk +
 // global fallback. Returns "" if nothing is found.
 func discoverFromDir(dir string) string {
-	// Temporarily change cwd so DiscoverConfig's upward walk starts from
-	// the right place. Restore on return — even on error.
-	prev, _ := os.Getwd()
-	defer os.Chdir(prev) //nolint:errcheck
-	if err := os.Chdir(dir); err != nil {
-		return ""
-	}
-	return config.DiscoverConfig()
+	return config.DiscoverConfigFrom(dir)
 }

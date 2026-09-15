@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -41,7 +42,10 @@ func NewRouter(cfg types.LLMConfig, lookup SecretLookup) (*Router, error) {
 		for name, m := range cfg.Models {
 			provider, err := newProviderFromModel(m, lookup)
 			if err != nil {
-				// Skip models with missing keys; they're optional.
+				var missing *MissingCredentialError
+				if !errors.As(err, &missing) {
+					return nil, fmt.Errorf("model %q: %w", name, err)
+				}
 				continue
 			}
 			r.models[name] = provider
@@ -58,13 +62,12 @@ func NewRouter(cfg types.LLMConfig, lookup SecretLookup) (*Router, error) {
 			}
 		}
 		if r.defaults == "" {
-			for name := range r.models {
-				r.defaults = name
-				break
+			if names := r.namesLocked(); len(names) > 0 {
+				r.defaults = names[0]
 			}
 		}
 		if len(r.models) == 0 {
-			return nil, fmt.Errorf("router: no usable models in llm.models (all missing keys)")
+			return nil, &MissingCredentialError{Name: "credentials for any configured model"}
 		}
 		return r, nil
 	}

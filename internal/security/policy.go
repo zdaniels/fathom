@@ -21,8 +21,9 @@ type PolicyEngine struct {
 	// loop — Evaluate snapshots the config under RLock then matches on
 	// the snapshot, so a reload mid-evaluation just means the in-flight
 	// call finishes against the pre-reload rules (the next call sees new).
-	mu     sync.RWMutex
-	config types.PolicyConfig
+	mu            sync.RWMutex
+	config        types.PolicyConfig
+	authorizeUser func(string) bool
 }
 
 // PolicyContext is what a tool/skill invocation feeds into the engine.
@@ -55,6 +56,9 @@ func NewPolicyEngine(cfg types.PolicyConfig) *PolicyEngine {
 // Evaluate runs the rules against ctx. Returns the first decisive match
 // (deny wins) or falls through to defaults.
 func (p *PolicyEngine) Evaluate(ctx PolicyContext) PolicyEvaluation {
+	if ctx.UserID != "" && !p.UserAllowed(ctx.UserID) {
+		return PolicyEvaluation{Decision: types.PolicyDeny, Reason: "Execution role required", Audit: true}
+	}
 	cfg := p.snapshot()
 	for _, rule := range cfg.Rules {
 		if !matchesWhen(rule.When, ctx) {
@@ -269,4 +273,17 @@ func compileGlob(pattern string) (*regexp.Regexp, error) {
 	}
 	sb.WriteByte('$')
 	return regexp.Compile(sb.String())
+}
+
+// SetUserAuthorizer adds a role boundary that policy rules cannot override.
+func (p *PolicyEngine) SetUserAuthorizer(fn func(string) bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.authorizeUser = fn
+}
+func (p *PolicyEngine) UserAllowed(user string) bool {
+	p.mu.RLock()
+	fn := p.authorizeUser
+	p.mu.RUnlock()
+	return fn == nil || fn(user)
 }

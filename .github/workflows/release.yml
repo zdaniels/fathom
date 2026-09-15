@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version-file: go.mod
           cache: true
       # cosign must be on PATH before goreleaser runs — the signs: block
       # shells out to it to sign checksums.txt with the workflow's OIDC identity.

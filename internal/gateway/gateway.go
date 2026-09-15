@@ -95,6 +95,9 @@ type Gateway struct {
 	configPath       string
 	policyPath       string
 	settingsEditAuth func(userID string) bool
+	settingsGuard    func(http.ResponseWriter, *http.Request) bool
+	executionAuth    func(userID string) bool
+	ready            bool
 	cleanupTicker    *time.Ticker
 	cleanupStop      chan struct{}
 
@@ -236,6 +239,32 @@ func (g *Gateway) SetSettingsEditAuth(fn func(userID string) bool) {
 	g.mu.Unlock()
 }
 
+// SetSettingsGuard applies enterprise hardening to settings requests.
+func (g *Gateway) SetSettingsGuard(fn func(http.ResponseWriter, *http.Request) bool) {
+	g.settingsGuard = fn
+}
+
+// SetExecutionAuth restricts dispatch before any model, tool, or shared state is touched.
+func (g *Gateway) SetExecutionAuth(fn func(string) bool) { g.executionAuth = fn }
+func (g *Gateway) executionAllowed(w http.ResponseWriter, user string) bool {
+	if g.executionAuth != nil && !g.executionAuth(user) {
+		jsonError(w, 403, "Agent execution requires an operator or admin role on this instance")
+		return false
+	}
+	return true
+}
+func (g *Gateway) SetReady(ready bool) { g.mu.Lock(); g.ready = ready; g.mu.Unlock() }
+func (g *Gateway) handleReady(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	ready := g.ready
+	g.mu.RUnlock()
+	if !ready {
+		jsonError(w, 503, "Agent backend is not configured")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ready": true})
+}
+
 // canEditSettings resolves the effective edit permission for a user. When no
 // predicate is wired, fall back to mode: personal mode is single-user and
 // self-administered (editable); team/enterprise without an RBAC wiring is
@@ -298,6 +327,7 @@ func (g *Gateway) Start() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", g.handleHealth)
+	mux.HandleFunc("/api/v1/ready", g.handleReady)
 	mux.HandleFunc("/api/v1/message", g.handleMessage)
 	mux.HandleFunc("/api/v1/stream", g.handleStream)
 	mux.HandleFunc("/api/v1/session", g.handleGetSession)
@@ -404,7 +434,11 @@ func (g *Gateway) handleMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !g.executionAllowed(w, authResult.UserID) {
+		return
+	}
 	sess := g.Sessions.Create(authResult.UserID, remoteAddr(r))
+	defer g.Sessions.Destroy(sess.ID)
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
 	if err != nil {
