@@ -11,6 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Verify offline skill isolation
+        env:
+          FATHOM_TEST_SKILL_CONTAINER: "1"
+        run: go test -count=1 -run TestRequiredSandboxContainerBoundary ./internal/skills
       - name: Build container
         run: docker build -t fathom:test .
       - name: Smoke test deployment

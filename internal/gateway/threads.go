@@ -415,11 +415,21 @@ func (g *Gateway) serveThreadSendMessage(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	var in struct {
-		Text string `json:"text"`
+		Text            string `json:"text"`
+		ClientMessageID string `json:"clientMessageId"`
 	}
 	if err := json.Unmarshal(body, &in); err != nil || in.Text == "" {
 		jsonError(w, http.StatusBadRequest, "missing 'text' field")
 		return
+	}
+
+	if len(in.ClientMessageID) > 128 {
+		jsonError(w, 400, "clientMessageId is too long")
+		return
+	}
+	userMetadata := map[string]interface{}{}
+	if in.ClientMessageID != "" {
+		userMetadata["clientMessageId"] = in.ClientMessageID
 	}
 
 	// Slash-command interception. `/model`, `/models`, `/model <name>`,
@@ -429,20 +439,20 @@ func (g *Gateway) serveThreadSendMessage(w http.ResponseWriter, r *http.Request,
 	// it from one device and the others' UIs should reflect the new
 	// state). Output appears as a synthetic agent_message.
 	if cmdReply, handled := g.maybeHandleSlashCommand(t, in.Text, authRes); handled {
-		g.writeCannedReply(w, t, authRes, in.Text, cmdReply)
+		g.writeCannedReply(w, t, authRes, in.Text, cmdReply, userMetadata)
 		return
 	}
 	if idReply, handled := maybeHandleIdentityQuestion(in.Text); handled {
-		g.writeCannedReply(w, t, authRes, in.Text, idReply)
+		g.writeCannedReply(w, t, authRes, in.Text, idReply, userMetadata)
 		return
 	}
 	if modelReply, handled := g.maybeHandleModelQuestion(t, in.Text); handled {
-		g.writeCannedReply(w, t, authRes, in.Text, modelReply)
+		g.writeCannedReply(w, t, authRes, in.Text, modelReply, userMetadata)
 		return
 	}
 
 	// Persist + publish the user message.
-	userMsg, err := g.Threads.Append(t.ID, "user", in.Text, authRes.DeviceID, nil)
+	userMsg, err := g.Threads.Append(t.ID, "user", in.Text, authRes.DeviceID, userMetadata)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -775,8 +785,8 @@ func (g *Gateway) serveSearchMessages(w http.ResponseWriter, r *http.Request) {
 // the same shape as the normal agent path. Shared between slash
 // commands and the identity-question intercept — both bypass the LLM
 // and need exactly the same plumbing.
-func (g *Gateway) writeCannedReply(w http.ResponseWriter, t threads.Thread, authRes auth.Result, userText, agentText string) {
-	userMsg, err := g.Threads.Append(t.ID, "user", userText, authRes.DeviceID, nil)
+func (g *Gateway) writeCannedReply(w http.ResponseWriter, t threads.Thread, authRes auth.Result, userText, agentText string, userMetadata map[string]interface{}) {
+	userMsg, err := g.Threads.Append(t.ID, "user", userText, authRes.DeviceID, userMetadata)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return

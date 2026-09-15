@@ -251,3 +251,34 @@ func waitForLine(t *testing.T, r io.Reader, want string, timeout time.Duration) 
 		return false
 	}
 }
+
+func TestThreadMessagesPreserveClientCorrelationID(t *testing.T) {
+	for _, text := range []string{"run the task", "who are you?"} {
+		t.Run(text, func(t *testing.T) {
+			g, tok := newTestGatewayWithThreads(t)
+			defer g.Pairing.Close()
+			g.SetMessageHandler(func(context.Context, types.ChannelMessage, types.Session) (string, error) { return "done", nil })
+			th, err := g.Threads.Create("admin", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(map[string]string{"text": text, "clientMessageId": "local-request-123"})
+			r := httptest.NewRequest("POST", "/api/v1/threads/"+th.ID+"/messages", strings.NewReader(string(body)))
+			r.Header.Set("Authorization", "Bearer "+tok)
+			w := httptest.NewRecorder()
+			g.handleThreadItem(w, r)
+			if w.Code != 200 {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			var response struct {
+				User threads.Message `json:"user_message"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.User.Metadata["clientMessageId"] != "local-request-123" {
+				t.Fatal("response lost correlation ID")
+			}
+		})
+	}
+}

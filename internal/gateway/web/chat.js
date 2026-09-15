@@ -58,6 +58,8 @@
     threads: [],
     sse: null,
     rendered: new Map(), // messageId → DOM element (for dedup)
+    pendingUsers: new Map(), // clientMessageId → optimistic DOM element
+    threadGeneration: 0,
     inFlight: false,
     // Cross-device thinking indicator: single shared spinner element
     // driven by agent_thinking / agent_done SSE events. Both local
@@ -426,14 +428,17 @@
   async function switchThread(threadId) {
     if (state.currentThreadId === threadId && state.sse) return;
     teardownSSE();
+    const generation = ++state.threadGeneration;
+    clearThinking();
     state.currentThreadId = threadId;
     state.rendered.clear();
+    state.pendingUsers.clear();
     history.innerHTML = "";
     localStorage.setItem(LAST_THREAD_KEY, threadId);
 
     // Fetch tail history.
     const res = await apiGet(`api/v1/threads/${threadId}`);
-    if (!res) return;
+    if (!res || generation !== state.threadGeneration) return;
     setTitle(res.thread && res.thread.title);
     for (const m of res.messages || []) renderMessage(m);
 
@@ -486,7 +491,7 @@
         for (const evt of events) {
           const parsed = parseSSE(evt);
           if (!parsed) continue;
-          handleStreamEvent(parsed);
+          if (!ctrl.signal.aborted && state.currentThreadId === threadId) handleStreamEvent(parsed);
         }
       }
     }).catch((err) => {
@@ -494,7 +499,7 @@
       // Auto-reconnect after a short delay if the user is still here.
       console.warn("SSE dropped:", err.message);
       setTimeout(() => {
-        if (state.currentThreadId === threadId) subscribeSSE(threadId);
+        if (!ctrl.signal.aborted && state.currentThreadId === threadId) subscribeSSE(threadId);
       }, 2000);
     });
   }
@@ -517,22 +522,14 @@
         // Cross-device thinking indicator: another device (or this
         // one) just sent a message and the agent is working on it.
         // Show the spinner if we don't already have one in flight.
-        if (!state.remoteSpinner) {
-          state.remoteSpinner = appendSpinner();
-        }
+        ensureThinking();
         break;
       case "agent_done":
-        if (state.remoteSpinner) {
-          state.remoteSpinner.remove();
-          state.remoteSpinner = null;
-        }
+        clearThinking();
         if (evt.data && evt.data.message) renderMessage(evt.data.message);
         break;
       case "agent_error":
-        if (state.remoteSpinner) {
-          state.remoteSpinner.remove();
-          state.remoteSpinner = null;
-        }
+        clearThinking();
         appendError(evt.data && evt.data.error || "Agent error");
         break;
       default:
@@ -563,7 +560,16 @@
   // message ID — that way SSE re-deliveries of a message we POSTed are
   // silently ignored.
   function renderMessage(m) {
+    if (!m || !m.id || (m.thread_id && m.thread_id !== state.currentThreadId)) return;
     if (state.rendered.has(m.id)) return;
+    const clientId = m.metadata && m.metadata.clientMessageId;
+    const pending = m.role === "user" && state.pendingUsers.get(clientId);
+    if (pending) {
+      state.pendingUsers.delete(clientId);
+      state.rendered.delete(clientId);
+      state.rendered.set(m.id, pending);
+      return;
+    }
     const turn = document.createElement("div");
     if (m.role === "user") {
       turn.className = "turn-user";
@@ -581,12 +587,23 @@
     history.appendChild(turn);
     state.rendered.set(m.id, turn);
     scrollToBottom();
+    return turn;
   }
 
   // Words the spinner cycles through. "thinking…" is the workhorse;
   // "fathoming…" is the wink at the brand — shows roughly 1 in 4
   // ticks so it's a treat, not a gimmick.
   const SPINNER_WORDS = ["thinking…", "thinking…", "fathoming…", "thinking…"];
+
+  function ensureThinking() {
+    if (!state.remoteSpinner) state.remoteSpinner = appendSpinner();
+    return state.remoteSpinner;
+  }
+
+  function clearThinking(expected = state.remoteSpinner) {
+    if (expected) expected.remove();
+    if (state.remoteSpinner === expected) state.remoteSpinner = null;
+  }
 
   function appendSpinner() {
     const t = document.createElement("div");
@@ -742,25 +759,27 @@
     }
     state.inFlight = true;
     sendBtn.disabled = true;
-    // Optimistic render of the user's message so the input doesn't
-    // appear to vanish while the agent thinks. Local id; when the
-    // server's real user_message comes back we mark its id as
-    // already-seen so the SSE redelivery doesn't double-render.
+    // Correlate the optimistic bubble with the persisted message across both
+    // response paths, regardless of whether SSE or the POST completes first.
     const localId = "local-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
     const now = new Date().toISOString();
-    renderMessage({ id: localId, role: "user", content: text, created_at: now });
-    const spinner = appendSpinner();
+    const threadId = state.currentThreadId;
+    const generation = state.threadGeneration;
+    const optimistic = renderMessage({ id: localId, role: "user", content: text, created_at: now });
+    state.pendingUsers.set(localId, optimistic);
+    const spinner = ensureThinking();
 
     try {
-      const res = await fetch(`api/v1/threads/${state.currentThreadId}/messages`, {
+      const res = await fetch(`api/v1/threads/${threadId}/messages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: "Bearer " + state.token,
         },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, clientMessageId: localId }),
       });
-      spinner.remove();
+      clearThinking(spinner);
+      if (generation !== state.threadGeneration) return;
       if (res.status === 401) { handleAuthFailure(); return; }
       if (!res.ok) {
         const t = await res.text().catch(() => "");
@@ -768,20 +787,18 @@
         return;
       }
       const data = await res.json();
-      // The optimistic user message is already in the DOM; mark the
-      // server's real user_message id as seen so SSE redelivery skips
-      // it without rendering a duplicate.
-      if (data.user_message) state.rendered.set(data.user_message.id, /* placeholder */ true);
+      if (generation !== state.threadGeneration) return;
+      if (data.user_message) renderMessage(data.user_message);
       if (data.agent_message) renderMessage(data.agent_message);
       // Auto-title may have updated the topbar.
       if (data.agent_message) {
         // Refresh title from server (cheap, one round trip).
-        apiGet(`api/v1/threads/${state.currentThreadId}`).then((meta) => {
-          if (meta && meta.thread) setTitle(meta.thread.title);
+        apiGet(`api/v1/threads/${threadId}`).then((meta) => {
+          if (generation === state.threadGeneration && meta && meta.thread) setTitle(meta.thread.title);
         }).catch(() => {});
       }
     } catch (err) {
-      spinner.remove();
+      clearThinking(spinner);
       appendError("Network error: " + err.message);
     } finally {
       state.inFlight = false;

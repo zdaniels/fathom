@@ -54,3 +54,50 @@ func TestRequiredSandboxMountsNoHostRoot(t *testing.T) {
 		t.Fatal(inv.EntryPoint)
 	}
 }
+
+// CI opts in on a Docker-enabled runner. This probes the actual isolation
+// boundary, not just command-line flags, without real credentials or services.
+func TestRequiredSandboxContainerBoundary(t *testing.T) {
+	if os.Getenv("FATHOM_TEST_SKILL_CONTAINER") != "1" {
+		t.Skip("requires Docker-enabled integration runner")
+	}
+	t.Setenv("FATHOM_SKILL_SANDBOX", "required")
+	dir := t.TempDir()
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "secret")
+	if err := os.WriteFile(secret, []byte("must-not-be-readable"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := os.ReadFile("runner.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runnerPath := filepath.Join(dir, "runner.js")
+	os.WriteFile(runnerPath, runner, 0600)
+	skillDir := filepath.Join(dir, "skill")
+	os.Mkdir(skillDir, 0700)
+	code := `import fs from 'node:fs';
+ export async function run(input) {
+ let readable=false,writable=false,network=false;
+ try {fs.readFileSync(input.secret);readable=true;}catch{}
+ try {fs.writeFileSync('/skill/write','no');writable=true;}catch{}
+ try {await fetch('http://1.1.1.1',{signal:AbortSignal.timeout(1500)});network=true;}catch{}
+ return {readable,writable,network,uid:process.getuid()};
+ }`
+	entry := filepath.Join(skillDir, "probe.mjs")
+	os.WriteFile(entry, []byte(code), 0600)
+	s := NewSandbox(runnerPath, 30000).WithIsolation(secret)
+	out, err := s.Invoke(context.Background(), SandboxInvocation{EntryPoint: entry, FunctionName: "run", Input: map[string]string{"secret": secret}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := out.(map[string]interface{})
+	for _, key := range []string{"readable", "writable", "network"} {
+		if result[key] != false {
+			t.Fatalf("isolation failed: %s = %v", key, result[key])
+		}
+	}
+	if result["uid"] == float64(0) {
+		t.Fatal("skill ran as root")
+	}
+}

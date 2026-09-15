@@ -20,6 +20,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Browser chat regression tests
+        run: node --test internal/gateway/web/chat.test.cjs
       - name: go vet
         run: go vet ./...
       - name: go build
