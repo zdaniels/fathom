@@ -33,7 +33,16 @@
       </form>
       <button id="start-demo" type="button">Start demo project</button>
  <p class="muted">Creates a separate shipping calculator project with a bug and tests. Docker is required; agents start only when you ask.</p>
- <p id="run-setup" class="muted"></p>
+ <details>
+        <summary>Upload a project</summary>
+        <form id="project-upload-form">
+          <label>New project workspace<input id="project-name" required maxlength="100" /></label>
+          <label>Project ZIP<input id="project-zip" type="file" accept=".zip,application/zip" required /></label>
+          <button id="project-upload" type="submit">Create from ZIP</button>
+        </form>
+        <p class="muted">Creates a new workspace. Up to 200 files, 400 entries, and 16 MB compressed or expanded. Folder paths are preserved; links are rejected. Include needed dependencies for offline runs. Files are shared with workspace members.</p>
+      </details>
+      <p id="run-setup" class="muted"></p>
       <p id="live-status" class="muted" role="status"></p>
       <div id="workspace-content" hidden>
         <section>
@@ -95,7 +104,8 @@
         </section>
         <section>
           <h2>Workspace files</h2>
-          <button id="download" type="button">
+          <button id="browse-files" type="button">Browse files</button>
+ <button id="download" type="button">
             Download workspace archive
           </button>
           <p class="muted">
@@ -109,6 +119,14 @@
         </section>
       </div>
     </main>
+    <dialog id="files-dialog">
+      <h2>Workspace files</h2>
+      <p class="muted">Read-only snapshot. Files may change during agent runs; refresh to load current contents. Text previews are limited to 32 KB per file and 1 MB total. Binary files and links have no preview.</p>
+      <div class="actions"><button id="files-refresh" type="button">Refresh files</button><button id="files-close" type="button">Close</button></div>
+      <p id="files-status" role="status"></p>
+      <label>Filter paths<input id="files-filter" type="search" /></label>
+      <div class="file-browser"><div id="files-list" aria-label="File paths"></div><section><h3 id="file-title">Choose a file</h3><pre id="file-preview"></pre></section></div>
+    </dialog>
     <dialog id="connections-dialog">
       <h2>Workspace task connections</h2>
       <p>

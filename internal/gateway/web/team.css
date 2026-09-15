@@ -292,3 +292,10 @@ summary {
 #connections-form label {
   min-width: 0;
 }
+
+.file-browser { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 3fr); gap: 16px; }
+#files-list { max-height: 480px; overflow: auto; }
+#files-list button { display: block; width: 100%; text-align: left; overflow-wrap: anywhere; margin-bottom: 4px; }
+#file-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 480px; overflow: auto; }
+#file-title { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .file-browser { grid-template-columns: 1fr; } #files-list { max-height: 180px; } }

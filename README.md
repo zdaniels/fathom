@@ -233,6 +233,9 @@ The built-in board needs no external task service. Optional workspace-scoped
 Use **Start demo project** on the board to try a sample bug-fix and review workflow
 with included files and tests. Docker is required; no external project is needed.
 
+Upload a ZIP into a new workspace and use **Browse files** to filter paths and
+preview text. Uploads preserve folder paths and run offline; [limits and setup](docs/collaboration.md#upload-and-browse-a-project).
+
 Instance admins can set up Linear and Jira Cloud connections from the board’s
 **Manage connections** dialog, with credentials in the encrypted vault and changes
 active immediately. Connections import issues and publish handoff comments
