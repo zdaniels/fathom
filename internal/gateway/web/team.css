@@ -283,3 +283,12 @@ summary {
 .evidence-warning {
   color: #ffd38a;
 }
+
+#connections-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+#connections-form label {
+  min-width: 0;
+}

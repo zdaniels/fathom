@@ -130,3 +130,41 @@ func TestRoleRevocationReachesToolPolicy(t *testing.T) {
 		t.Fatal("revoked user could execute tool")
 	}
 }
+
+func TestConnectionSetupUsesSettingsAdminBoundary(t *testing.T) {
+	cfg := types.DefaultConfig()
+	cfg.Mode = types.ModeTeam
+	cfg.DataDir = t.TempDir()
+	cfg.Enterprise = &types.EnterpriseBlock{Admin: &types.AdminConfig{AllowCIDRs: []string{"127.0.0.1/32"}}}
+	g := gateway.New(cfg)
+	adminToken, _ := g.Auth.CreateAPIToken("admin", "test")
+	mesh := security.NewMesh(types.PolicyConfig{}, security.MeshOptions{})
+	ent, err := Mount(g, cfg, mesh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ent.DB.Close()
+	check := func(user, method, remote, step string) (bool, int) {
+		r := httptest.NewRequest(method, "/api/v1/board/demo/connections/save", nil)
+		r.RemoteAddr = remote
+		r.Header.Set("Authorization", "Bearer "+adminToken)
+		r.Header.Set("X-Step-Up-Token", step)
+		w := httptest.NewRecorder()
+		ok := g.RequireSettingsAdmin(w, r, user)
+		return ok, w.Code
+	}
+	if ok, status := check("admin", "GET", "203.0.113.1:123", ""); ok || status != 404 {
+		t.Fatal("off-network credential management allowed", status)
+	}
+	if ok, status := check("viewer", "GET", "127.0.0.1:123", ""); ok || status != 403 {
+		t.Fatal("viewer credential management allowed", status)
+	}
+	ent.Admin.RequireStepUp = true
+	ent.Admin.StepUpAuth = func(token string) (string, bool) { return "admin", token == "fresh" }
+	if ok, status := check("admin", "POST", "127.0.0.1:123", ""); ok || status != 403 {
+		t.Fatal("missing step-up accepted", status)
+	}
+	if ok, status := check("admin", "POST", "127.0.0.1:123", "fresh"); !ok {
+		t.Fatal("valid fresh admin rejected", status)
+	}
+}

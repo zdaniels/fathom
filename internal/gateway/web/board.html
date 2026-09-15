@@ -73,6 +73,9 @@
         <section>
           <h2>Task connections</h2>
           <p id="connections-note"></p>
+          <button id="manage-connections" type="button" hidden>
+            Manage connections
+          </button>
           <form id="import-form">
             <label>Connection<select id="connection"></select></label
             ><label
@@ -104,6 +107,73 @@
         </section>
       </div>
     </main>
+    <dialog id="connections-dialog">
+      <h2>Workspace task connections</h2>
+      <p>
+        Connect one Linear team or Jira project per provider. Saved changes take
+        effect immediately.
+      </p>
+      <form id="connections-form">
+        <label
+          >Provider<select id="connection-provider">
+            <option value="linear">Linear</option>
+            <option value="jira">Jira Cloud</option>
+          </select></label
+        >
+        <label
+          ><span id="connection-scope-label">Linear team UUID</span
+          ><input
+            id="connection-scope"
+            required
+            maxlength="64"
+            placeholder="Team UUID from Linear settings"
+        /></label>
+        <label id="connection-site-field" hidden
+          >Jira site<input
+            id="connection-site"
+            type="url"
+            maxlength="250"
+            placeholder="https://your-team.atlassian.net"
+        /></label>
+        <label id="connection-email-field" hidden
+          >Jira account email<input
+            id="connection-email"
+            type="email"
+            maxlength="254"
+            autocomplete="username"
+        /></label>
+        <label
+          >API token<input
+            id="connection-token"
+            type="password"
+            maxlength="8192"
+            autocomplete="off"
+            placeholder="Enter API token"
+        /></label>
+        <p id="connection-saved" class="muted"></p>
+        <p class="muted">
+          Tokens are stored in the server’s encrypted vault. Leave the token
+          blank to keep a saved credential. Changing a Jira site or email
+          requires a new token.
+        </p>
+        <div class="actions">
+          <button id="connection-check" type="button">Check connection</button>
+          <button id="connection-save" type="submit">Save connection</button>
+          <button id="connection-disable" type="button" class="secondary">
+            Disable connection
+          </button>
+          <button id="connection-close" type="button" class="secondary">
+            Close
+          </button>
+        </div>
+      </form>
+      <p class="muted">
+        Check verifies team/project read access without publishing anything.
+        Disabling retains the credential for later use. Imports and publishing
+        handoffs remain explicit actions.
+      </p>
+      <p id="connection-status" role="status"></p>
+    </dialog>
     <dialog id="task-dialog">
       <form id="edit-form">
         <label>Title<input id="edit-title" required maxlength="250" /></label

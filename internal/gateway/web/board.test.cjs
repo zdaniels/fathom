@@ -26,6 +26,9 @@ class Element {
   querySelectorAll() {
     return [];
   }
+  reportValidity() {
+    return true;
+  }
   showModal() {
     this.open = true;
   }
@@ -81,6 +84,7 @@ async function setup() {
     window: { addEventListener() {} },
     localStorage: { getItem: () => "token" },
     navigator: {},
+    sessionStorage: { getItem: () => null, removeItem() {} },
     console,
     URL,
     AbortController,
@@ -108,11 +112,15 @@ async function setup() {
         return { ok: true, status: 200, body };
       }
       if (options.method === "POST") {
+        env.postURL = url;
+        env.postHeaders = options.headers;
         env.posted = JSON.parse(options.body);
         return new Promise((resolve) => {
           env.resolvePost = resolve;
         });
       }
+      if (url.endsWith("/connections"))
+        return { ok: true, json: async () => env.connections || [] };
       if (url.endsWith("/evidence")) return { ok: true, json: async () => [] };
       env.snapshots++;
       return { ok: true, json: async () => env.data };
@@ -123,7 +131,7 @@ async function setup() {
   vm.runInContext(
     source.replace(
       /\}\)\(\);\s*$/,
-      "globalThis.board={state,startLive,stopLive,refresh,action,openTask};})();",
+      "globalThis.board={state,startLive,stopLive,refresh,action,openTask,connectionAction};})();",
     ),
     context,
   );
@@ -227,4 +235,79 @@ test("expired access ends updates without retrying or displaying the workspace",
   assert.equal(e.board.state.workspace, "");
   assert.equal(e.el("workspace-content").hidden, true);
   assert.equal(e.el("task-dialog").open, false);
+});
+
+async function openConnectionForm(e, records = []) {
+  e.connections = records;
+  e.data.canManageConnections = true;
+  await e.el("manage-connections").onclick();
+}
+test("connection setup saves credentials once and clears the form token", async () => {
+  const e = await setup();
+  await openConnectionForm(e);
+  e.el("connection-scope").value = "11111111-1111-4111-8111-111111111111";
+  e.el("connection-token").value = "mock-api-token";
+  const saving = e.board.connectionAction("save");
+  await tick();
+  assert.match(e.postURL, /connections\/save$/);
+  assert.equal(e.posted.token, "mock-api-token");
+  assert.equal(e.posted.revision, 0);
+  e.connections = [
+    {
+      provider: "linear",
+      scope: e.posted.scope,
+      credentialSaved: true,
+      enabled: true,
+      revision: 1,
+      origin: "board",
+    },
+  ];
+  e.resolvePost({
+    ok: true,
+    json: async () => ({ status: "Connection saved." }),
+  });
+  await saving;
+  assert.equal(e.el("connection-token").value, "");
+  assert.equal(e.el("connection-token").required, false);
+  assert.equal(e.el("connection-status").textContent, "Connection saved.");
+});
+test("existing connections keep their credential without echoing it", async () => {
+  const e = await setup();
+  await openConnectionForm(e, [
+    {
+      provider: "linear",
+      scope: "team",
+      credentialSaved: true,
+      enabled: true,
+      revision: 3,
+      origin: "board",
+    },
+  ]);
+  assert.equal(e.el("connection-token").value, "");
+  const saving = e.board.connectionAction("save");
+  await tick();
+  assert.equal(e.posted.token, "");
+  assert.equal(e.posted.revision, 3);
+  e.resolvePost({
+    ok: false,
+    json: async () => ({ error: "Connection changed; reopen setup." }),
+  });
+  await saving;
+  assert.equal(
+    e.el("connection-status").textContent,
+    "Connection changed; reopen setup.",
+  );
+});
+test("changing provider or closing setup clears the entered token", async () => {
+  const e = await setup();
+  await openConnectionForm(e);
+  e.el("connection-token").value = "mock-api-token";
+  e.el("connection-provider").value = "jira";
+  e.el("connection-provider").onchange();
+  assert.equal(e.el("connection-token").value, "");
+  assert.equal(e.el("connection-site").required, true);
+  e.el("connection-token").value = "mock-jira-token";
+  e.el("connection-close").onclick();
+  assert.equal(e.el("connection-token").value, "");
+  assert.equal(e.el("connections-dialog").open, false);
 });

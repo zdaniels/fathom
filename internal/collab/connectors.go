@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zdaniels/fathom/pkg/types"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/zdaniels/fathom/pkg/types"
 )
 
 // Connection is configured by the instance owner, scoped to exactly one
@@ -31,6 +32,9 @@ func (c *Connector) request(ctx context.Context, method, path string, body any, 
 	cfg := c.Config
 	if cfg.Scope == "" {
 		return errors.New("connector requires a team/project scope")
+	}
+	if c.Lookup == nil {
+		return errors.New("connector credential is unavailable")
 	}
 	token, err := c.Lookup(cfg.TokenSecret)
 	if err != nil || token == "" {
@@ -69,7 +73,9 @@ func (c *Connector) request(ctx context.Context, method, path string, body any, 
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("connector redirects are refused") }}
 	}
-	res, err := client.Do(req)
+	safeClient := *client
+	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("connector redirects are refused") }
+	res, err := safeClient.Do(req)
 	if err != nil {
 		return errors.New("task provider request failed")
 	}
@@ -78,7 +84,10 @@ func (c *Connector) request(ctx context.Context, method, path string, body any, 
 		return fmt.Errorf("task provider returned HTTP %d", res.StatusCode)
 	}
 	if out != nil {
-		return json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(out)
+		if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(out); err != nil {
+			return errors.New("task provider returned an invalid response")
+		}
+		return nil
 	}
 	return nil
 }
@@ -186,4 +195,30 @@ func adfText(raw json.RawMessage) string {
 	}
 	walk(node)
 	return strings.TrimSpace(b.String())
+}
+
+// Check verifies read access to the selected team/project without creating an
+// issue or comment. It does not claim that comment-write permission is granted.
+func (c *Connector) Check(ctx context.Context) error {
+	if c.Config.Provider == "linear" {
+		var res struct {
+			Data   struct{ Team *struct{ ID string } }
+			Errors []json.RawMessage
+		}
+		if err := c.request(ctx, "POST", "", map[string]any{"query": `query($id:String!){team(id:$id){id}}`, "variables": map[string]string{"id": c.Config.Scope}}, &res); err != nil {
+			return err
+		}
+		if len(res.Errors) > 0 || res.Data.Team == nil || res.Data.Team.ID != c.Config.Scope {
+			return errors.New("Linear team is unavailable for this API key")
+		}
+		return nil
+	}
+	var res struct{ Key string }
+	if err := c.request(ctx, "GET", "/rest/api/3/project/"+url.PathEscape(c.Config.Scope), nil, &res); err != nil {
+		return err
+	}
+	if res.Key != c.Config.Scope {
+		return errors.New("Jira project is unavailable for this API token")
+	}
+	return nil
 }

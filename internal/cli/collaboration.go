@@ -40,7 +40,14 @@ func mountBoard(gw *gateway.Gateway, cfg types.Config, result *agentfactory.Resu
 	if router == nil {
 		router, _ = llm.NewRouter(cfg.LLM, lookup)
 	}
-	service := &collab.Service{Store: store, Runner: &collab.Runner{Router: router}, Lookup: lookup}
+	service := &collab.Service{Store: store, Runner: &collab.Runner{Router: router}, Lookup: lookup,
+		CanManageConnections: gw.SettingsAdminAllowed, ConnectionGuard: gw.RequireSettingsAdmin, AuditConnection: gw.AuditConnectionChange}
+	if result.Vault != nil {
+		service.SaveSecret = func(name, value string) error {
+			return result.Vault.Set(name, value, []string{"fathom:board-connector"})
+		}
+		service.DeleteSecret = func(name string) { result.Vault.Delete(name) }
+	}
 	if cfg.Collaboration != nil {
 		service.Runner.Image = cfg.Collaboration.Image
 		service.Connections = cfg.Collaboration.Connections
