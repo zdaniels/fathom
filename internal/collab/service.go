@@ -13,18 +13,25 @@ import (
 )
 
 type Service struct {
-	Store              *Store
-	Runner             *Runner
-	Auth               func(*http.Request) (string, error)
-	CanCreateWorkspace func(string) bool
-	Connections        []Connection
-	Lookup             func(string) (string, error)
-	mu                 sync.Mutex
-	runs               map[string]context.CancelFunc
-	subscribers        map[string]map[chan struct{}]bool
-	wg                 sync.WaitGroup
-	closed             bool
-	streamsStopped     bool
+	AuditConnection      func(workspace, user, provider, action string)
+	CanManageConnections func(*http.Request, string) bool
+	ConnectionGuard      func(http.ResponseWriter, *http.Request, string) bool
+	SaveSecret           func(string, string) error
+	DeleteSecret         func(string)
+	ConnectionClient     *http.Client
+	connectionMu         sync.Mutex
+	Store                *Store
+	Runner               *Runner
+	Auth                 func(*http.Request) (string, error)
+	CanCreateWorkspace   func(string) bool
+	Connections          []Connection
+	Lookup               func(string) (string, error)
+	mu                   sync.Mutex
+	runs                 map[string]context.CancelFunc
+	subscribers          map[string]map[chan struct{}]bool
+	wg                   sync.WaitGroup
+	closed               bool
+	streamsStopped       bool
 }
 
 func (s *Service) Close() {
@@ -116,6 +123,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, errors.New("workspace not found"))
 		return
 	}
+	if len(parts) >= 2 && parts[1] == "connections" {
+		action := ""
+		if len(parts) == 3 {
+			action = parts[2]
+		} else if len(parts) != 2 {
+			fail(w, 404, errors.New("route not found"))
+			return
+		}
+		s.manageConnections(w, r, workspace, user, action)
+		return
+	}
 	if r.Method == "GET" && len(parts) == 2 && parts[1] == "events" {
 		s.stream(w, r, workspace, user)
 		return
@@ -136,13 +154,19 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, err)
 			return
 		}
+		records, err := s.connectionRecords(workspace)
+		if err != nil {
+			fail(w, 500, errors.New("connections unavailable"))
+			return
+		}
 		connections := []Connection{}
-		for _, c := range s.Connections {
-			if c.WorkspaceID == workspace {
-				connections = append(connections, c)
+		for _, c := range records {
+			if c.Enabled {
+				connections = append(connections, c.Config)
 			}
 		}
-		respond(w, 200, map[string]any{"tasks": tasks, "members": members, "activity": events, "role": role, "connections": connections})
+		manage := role == "admin" && s.CanManageConnections != nil && s.CanManageConnections(r, user)
+		respond(w, 200, map[string]any{"tasks": tasks, "members": members, "activity": events, "role": role, "connections": connections, "canManageConnections": manage})
 		return
 	}
 	if len(parts) == 2 && parts[1] == "archive" && r.Method == "GET" {
@@ -247,7 +271,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !decode(w, r, &in) {
 				return
 			}
-			c := s.connector(workspace, in.Provider)
+			c, err := s.connector(workspace, in.Provider)
+			if err != nil {
+				fail(w, 500, errors.New("connections unavailable"))
+				return
+			}
 			if c == nil {
 				fail(w, 400, errors.New("connection is not configured for this workspace"))
 				return
@@ -404,7 +432,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 202, t)
 		return
 	case "publish":
-		c := s.connector(workspace, t.Source)
+		c, err := s.connector(workspace, t.Source)
+		if err != nil {
+			fail(w, 500, errors.New("connections unavailable"))
+			return
+		}
 		if c == nil {
 			fail(w, 400, errors.New("linked connection is unavailable"))
 			return
@@ -431,13 +463,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.notifyLocked(workspace)
 	respond(w, 200, t)
 }
-func (s *Service) connector(workspace, provider string) *Connector {
-	for _, c := range s.Connections {
-		if c.WorkspaceID == workspace && c.Provider == provider {
-			return &Connector{Config: c, Lookup: s.Lookup}
+func (s *Service) connector(workspace, provider string) (*Connector, error) {
+	records, err := s.connectionRecords(workspace)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range records {
+		if c.Enabled && c.Config.Provider == provider {
+			return &Connector{Config: c.Config, Lookup: s.Lookup, Client: s.ConnectionClient}, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 func (s *Service) run(ctx context.Context, cancel context.CancelFunc, t Task, review bool, user, previousReview string) {
 	defer s.wg.Done()

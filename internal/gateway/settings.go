@@ -597,3 +597,34 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// SettingsAdminAllowed describes whether an instance administrator may manage
+// credentials here. Mutation guards are still enforced on each write.
+func (g *Gateway) SettingsAdminAllowed(r *http.Request, user string) bool {
+	return g.settingsReachable(r) && g.canEditSettings(user)
+}
+
+// RequireSettingsAdmin reuses settings hardening, including CIDRs, rate limits,
+// audit availability and fresh SSO step-up, for credential management routes.
+func (g *Gateway) RequireSettingsAdmin(w http.ResponseWriter, r *http.Request, user string) bool {
+	if !g.settingsReachable(r) {
+		jsonError(w, 404, "Not found")
+		return false
+	}
+	if !g.canEditSettings(user) {
+		jsonError(w, 403, "Instance administrator access required")
+		return false
+	}
+	return g.settingsGuard == nil || g.settingsGuard(w, r)
+}
+
+// AuditConnectionChange records metadata only; never accept request bodies or
+// credentials here.
+func (g *Gateway) AuditConnectionChange(workspace, user, provider, action string) {
+	g.mu.RLock()
+	rec := g.audit
+	g.mu.RUnlock()
+	if rec != nil {
+		_ = rec.Log(workspace, user, "connection_change", map[string]interface{}{"provider": provider, "action": action})
+	}
+}

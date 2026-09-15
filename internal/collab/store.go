@@ -77,6 +77,7 @@ func Open(path string) (*Store, error) {
  CREATE UNIQUE INDEX IF NOT EXISTS one_workspace_run ON tasks(workspace_id) WHERE state='running';
  CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,task_id TEXT NOT NULL,record BLOB NOT NULL);
  CREATE TABLE IF NOT EXISTS run_evidence(workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,role TEXT NOT NULL,record BLOB NOT NULL,PRIMARY KEY(workspace_id,task_id,role));
+ CREATE TABLE IF NOT EXISTS task_connections(workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,provider TEXT,scope TEXT,site TEXT,email TEXT,token_secret TEXT,revision INTEGER NOT NULL,enabled INTEGER NOT NULL,PRIMARY KEY(workspace_id,provider));
  CREATE INDEX IF NOT EXISTS workspace_activity ON activity(workspace_id,id);`)
 	if err != nil {
 		db.Close()
