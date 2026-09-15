@@ -1,0 +1,186 @@
+/* Settings page — builds on the shared tokens in chat.css (:root vars).
+   Layout is a single scrolling column of cards, each holding labelled
+   rows with a control on the right. Mobile-first; widens on desktop. */
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+  text-decoration: none;
+  margin-right: 4px;
+  padding: 4px;
+  border-radius: 8px;
+}
+.back-link:hover { color: var(--text); background: var(--bg-input); }
+
+.settings {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-inner {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 14px calc(40px + env(safe-area-inset-bottom));
+}
+
+.settings-status { color: var(--text-dim); padding: 24px 4px; text-align: center; }
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-bubble);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+/* An author `display: flex` overrides the UA stylesheet's `[hidden]`, so the
+   banner would show even when the JS sets hidden (e.g. personal mode, where
+   settings are editable). Restore the hidden semantics — same pattern chat.css
+   uses for .modal/.drawer. */
+.banner[hidden] { display: none; }
+.banner svg { flex: 0 0 auto; color: var(--accent); }
+
+.mode-pill {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  margin-bottom: 14px;
+}
+
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px 16px;
+  margin-bottom: 16px;
+}
+.card h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 14px 0 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.card h2 + .row { border-top: none; }
+.row-text { flex: 1 1 auto; min-width: 0; }
+.row-title { font-size: 15px; font-weight: 500; color: var(--text); }
+.row-sub { font-size: 13px; color: var(--text-dim); margin-top: 3px; line-height: 1.45; }
+
+.restart-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(210, 150, 107, 0.12);
+  border-radius: 5px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+
+/* iOS-style toggle */
+.switch { position: relative; flex: 0 0 auto; width: 50px; height: 30px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background 0.18s, border-color 0.18s;
+  cursor: pointer;
+}
+.slider::before {
+  content: "";
+  position: absolute; left: 3px; top: 50%;
+  transform: translateY(-50%);
+  width: 24px; height: 24px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  transition: transform 0.18s;
+}
+.switch input:checked + .slider { background: var(--cobalt); border-color: var(--cobalt); }
+.switch input:checked + .slider::before { transform: translate(20px, -50%); }
+.switch input:disabled + .slider { opacity: 0.5; cursor: not-allowed; }
+
+.select {
+  flex: 0 0 auto;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 30px 8px 12px;
+  font-size: 15px;
+  max-width: 200px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b96a8' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.list-block { padding: 4px 0 14px; }
+.list-label { font-size: 13px; color: var(--text); margin-bottom: 6px; }
+.list-hint { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: 4px; }
+.list-area {
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
+}
+.list-area:focus { outline: none; border-color: var(--border-focus); }
+.list-area:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 14px 0 calc(14px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--bg) 60%, transparent);
+}
+.save-msg { font-size: 14px; color: var(--text-dim); }
+.save-msg.ok { color: var(--cobalt-bright); }
+.save-msg.err { color: var(--error); }
+
+.btn-primary {
+  background: var(--cobalt);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 22px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary:hover { background: var(--cobalt-bright); }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }

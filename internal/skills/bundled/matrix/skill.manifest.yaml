@@ -1,0 +1,32 @@
+name: matrix
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Matrix — federated, open-protocol chat. Send + read messages in rooms via the Client-Server API.
+category: communication
+tags:
+  - matrix
+  - federated
+  - open-protocol
+  - messaging
+permissions:
+  network:
+    - GET https://*/_matrix/*
+    - POST https://*/_matrix/*
+    - PUT https://*/_matrix/*
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - MATRIX_HOMESERVER
+    - MATRIX_ACCESS_TOKEN
+    - MATRIX_USER_ID
+tools:
+  - name: send_message
+    function: send_message
+  - name: list_rooms
+    function: list_rooms
+  - name: list_room_messages
+    function: list_room_messages
+  - name: whoami
+    function: whoami

@@ -1,0 +1,24 @@
+name: imessage
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Send and read iMessage via macOS Messages.app (macOS only). Uses AppleScript to drive Messages and reads the local chat database for history.
+category: communication
+tags:
+  - imessage
+  - apple
+  - messaging
+  - macos
+permissions:
+  network:
+    - GET https://*/*
+  filesystem: read-write
+  shell: deny
+  memory: own
+tools:
+  - name: send_message
+    function: send_message
+  - name: list_recent_messages
+    function: list_recent_messages
+  - name: list_chats
+    function: list_chats

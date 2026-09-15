@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0f14" />
+<meta name="apple-mobile-web-app-title" content="Fathom" />
+<title>fathom · Settings</title>
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+<link rel="stylesheet" href="chat.css" />
+<link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <a class="back-link" href="./" aria-label="Back to chat">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </a>
+      <img class="brand-mark" src="icons/icon-192.png" alt="" width="22" height="22" />
+      <span class="brand-name">Settings</span>
+    </div>
+  </div>
+</header>
+
+<main class="settings" id="settings">
+  <div class="settings-inner">
+
+    <!-- Banner shown when the account can't edit (team/enterprise viewer) -->
+    <div class="banner" id="readonly-banner" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span>These settings are managed by your administrator. You can view them but not make changes.</span>
+    </div>
+
+    <div class="mode-pill" id="mode-pill"></div>
+
+    <!-- Loading / error states -->
+    <div class="settings-status" id="status">Loading…</div>
+
+    <div id="form" hidden>
+
+      <section class="card">
+        <h2>Features</h2>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Shell execution</div>
+            <div class="row-sub">Let the agent run shell commands (tests, git, builds). The single biggest security surface — off by default.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="feat-shell" /><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Sub-agents</div>
+            <div class="row-sub">Allow the agent to delegate scoped tasks to child agents. <span class="restart-tag">restart to apply</span></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="feat-subagents" /><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Swarms</div>
+            <div class="row-sub">Enable the swarm tool — multiple role-agents collaborating on a shared blackboard over rounds. <span class="restart-tag">restart to apply</span></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="feat-swarm" /><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Claude Code</div>
+            <div class="row-sub">Let the agent hand coding tasks to the local Claude Code CLI (uses your Claude subscription login — no API key). It can read/write files in the workspace. <span class="restart-tag">restart to apply</span></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="feat-claudecode" /><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Web search</div>
+            <div class="row-sub">Allow the web-search tool to reach DuckDuckGo. Adds a network allow-rule for its domains.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="feat-websearch" /><span class="slider"></span></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Model</h2>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Default model</div>
+            <div class="row-sub">The model used when the router doesn't pick a profile-specific one. <span class="restart-tag">restart to apply</span></div>
+          </div>
+          <select id="model-default" class="select"></select>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Takeover</h2>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Takeover mode</div>
+            <div class="row-sub">Route <strong>every</strong> message straight to an external coding agent instead of the local agent — you're chatting with that agent through Fathom, each thread kept as one session. <span class="restart-tag">restart to apply</span></div>
+          </div>
+          <label class="switch"><input type="checkbox" id="takeover-enabled" /><span class="slider"></span></label>
+        </div>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Provider</div>
+            <div class="row-sub">Which CLI handles takeover: Claude Code (your Claude subscription) or OpenAI Codex (your ChatGPT login). <span class="restart-tag">restart to apply</span></div>
+          </div>
+          <select id="takeover-provider" class="select"></select>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Policy</h2>
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Network</div>
+            <div class="row-sub">Default egress posture. Per-host exceptions go in the allow-list below.</div>
+          </div>
+          <select id="pol-network" class="select">
+            <option value="deny">Deny</option>
+            <option value="allow">Allow</option>
+          </select>
+        </div>
+        <div class="list-block">
+          <div class="list-label">Allowed domains / IPs <span class="list-hint">one per line — supports * wildcards, e.g. *.github.com</span></div>
+          <textarea id="pol-domains" class="list-area" rows="4" placeholder="api.github.com&#10;*.openai.com"></textarea>
+        </div>
+
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Filesystem</div>
+            <div class="row-sub">Default file access for tools and skills.</div>
+          </div>
+          <select id="pol-fs" class="select">
+            <option value="read-only">Read-only</option>
+            <option value="read-write">Read-write</option>
+            <option value="deny">Deny</option>
+          </select>
+        </div>
+        <div class="list-block">
+          <div class="list-label">Allowed paths <span class="list-hint">one per line — supports ** , e.g. /Users/me/work/**</span></div>
+          <textarea id="pol-allowpaths" class="list-area" rows="3" placeholder="/Users/me/work/**"></textarea>
+        </div>
+        <div class="list-block">
+          <div class="list-label">Denied paths <span class="list-hint">these win over allowed paths</span></div>
+          <textarea id="pol-denypaths" class="list-area" rows="3" placeholder="**/.ssh/**&#10;**/.env"></textarea>
+        </div>
+
+        <div class="row">
+          <div class="row-text">
+            <div class="row-title">Secrets</div>
+            <div class="row-sub">Whether skills can read process secrets.</div>
+          </div>
+          <select id="pol-secrets" class="select">
+            <option value="isolated">Isolated</option>
+            <option value="accessible">Accessible</option>
+          </select>
+        </div>
+      </section>
+
+      <div class="save-bar" id="save-bar">
+        <span class="save-msg" id="save-msg"></span>
+        <button class="btn-primary" id="save-btn">Save changes</button>
+      </div>
+
+    </div>
+  </div>
+</main>
+
+<script src="settings.js"></script>
+</body>
+</html>

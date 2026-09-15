@@ -1,0 +1,56 @@
+name: telegram
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Send and receive messages via Telegram Bot API
+category: communication
+tags:
+  - telegram
+  - messaging
+  - bot
+permissions:
+  network:
+    - GET https://api.telegram.org/*
+    - POST https://api.telegram.org/*
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - TELEGRAM_BOT_TOKEN
+tools:
+  - name: send_message
+    function: sendMessage
+    description: Send a message via Telegram
+    parameters:
+      type: object
+      properties:
+        chatId: { type: string }
+        text: { type: string }
+        parseMode: { type: string, description: "HTML or Markdown" }
+      required: [chatId, text]
+  - name: get_updates
+    function: getUpdates
+    description: Get incoming updates (messages, etc.)
+    parameters:
+      type: object
+      properties:
+        offset: { type: number }
+        limit: { type: number }
+      required: []
+  - name: get_me
+    function: getMe
+    description: Get bot information
+    parameters:
+      type: object
+      properties: {}
+      required: []
+  - name: send_photo
+    function: sendPhoto
+    description: Send a photo via Telegram
+    parameters:
+      type: object
+      properties:
+        chatId: { type: string }
+        photoUrl: { type: string }
+        caption: { type: string }
+      required: [chatId, photoUrl]

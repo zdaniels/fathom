@@ -1,0 +1,28 @@
+version: 1
+
+defaults:
+  network: deny
+  filesystem: read-only
+  shell: deny
+  secrets: isolated
+
+rules:
+  - name: "Allow web search"
+    when: { skill: "web-search" }
+    allow: { network: ["GET https://*.google.com/*", "GET https://*.bing.com/*", "GET https://*.duckduckgo.com/*"] }
+    audit: true
+
+  - name: "Allow file editing in workspace"
+    when: { skill: "file-editor", path: "/workspace/**" }
+    allow: { filesystem: "read-write" }
+    deny: { filesystem: ["/etc/**", "/root/**", "**/.env", "**/*secret*", "**/*.pem", "**/*.key"] }
+
+  - name: "Block data exfiltration patterns"
+    when: { action: "shell-exec" }
+    deny: { command: ["*curl*", "*wget*", "*nc *", "*base64*|*", "*ncat*", "*socat*"] }
+    alert: critical
+
+  - name: "Block secret access by default"
+    when: { action: "read-file" }
+    deny: { path: ["**/.env*", "**/credentials*", "**/secret*", "**/*.pem", "**/*.key"] }
+    alert: warning

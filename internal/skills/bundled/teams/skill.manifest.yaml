@@ -1,0 +1,36 @@
+name: teams
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Microsoft Teams — read and send messages in chats and channels via the Microsoft Graph API.
+category: communication
+tags:
+  - teams
+  - microsoft
+  - messaging
+permissions:
+  network:
+    - GET https://graph.microsoft.com/*
+    - POST https://graph.microsoft.com/*
+    - POST https://login.microsoftonline.com/*
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - TEAMS_CLIENT_ID
+    - TEAMS_CLIENT_SECRET
+    - TEAMS_REFRESH_TOKEN
+    - TEAMS_TENANT_ID
+tools:
+  - name: send_chat_message
+    function: send_chat_message
+  - name: list_chats
+    function: list_chats
+  - name: list_recent_messages
+    function: list_recent_messages
+  - name: send_channel_message
+    function: send_channel_message
+  - name: list_joined_teams
+    function: list_joined_teams
+  - name: list_channels
+    function: list_channels

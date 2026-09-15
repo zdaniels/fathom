@@ -1,0 +1,55 @@
+name: slack
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Read and send messages in Slack workspaces via Web API
+category: communication
+tags:
+  - slack
+  - messaging
+  - workspace
+permissions:
+  network:
+    - GET https://slack.com/api/*
+    - POST https://slack.com/api/*
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - SLACK_BOT_TOKEN
+tools:
+  - name: list_channels
+    function: listChannels
+    description: List Slack channels
+    parameters:
+      type: object
+      properties:
+        limit: { type: number, description: "Maximum channels to return" }
+      required: []
+  - name: send_message
+    function: sendMessage
+    description: Send a message to a Slack channel
+    parameters:
+      type: object
+      properties:
+        channel: { type: string, description: "Channel ID" }
+        text: { type: string, description: "Message text" }
+        threadTs: { type: string, description: "Thread timestamp for replies" }
+      required: [channel, text]
+  - name: read_messages
+    function: readMessages
+    description: Read messages from a Slack channel
+    parameters:
+      type: object
+      properties:
+        channel: { type: string, description: "Channel ID" }
+        limit: { type: number, description: "Maximum messages (default 10)" }
+      required: [channel]
+  - name: list_users
+    function: listUsers
+    description: List Slack workspace users
+    parameters:
+      type: object
+      properties:
+        limit: { type: number, description: "Maximum users to return" }
+      required: []

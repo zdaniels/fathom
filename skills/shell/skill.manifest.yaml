@@ -1,0 +1,17 @@
+name: shell
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Execute shell commands with policy-gated access and audit logging
+
+permissions:
+  shell: allow
+  filesystem: none
+  network: none
+  memory: own
+
+category: system
+tags:
+  - shell
+  - terminal
+  - commands

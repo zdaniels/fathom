@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Build + test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test -race
+        run: go test -race -count=1 -timeout=5m ./...
+      - name: gofmt check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+  # Validate the release config (incl. the cosign signs: block) on every push
+  # so a MALFORMED .goreleaser.yml fails here instead of on release day — the
+  # release workflow itself only runs on a v* tag.
+  #
+  # `goreleaser check` exit codes: 0 = ok, 1 = invalid, 2 = valid-but-uses-
+  # deprecated-properties. We fail CI only on 1 (real schema errors, which is
+  # what this guard is for) and surface 2 as a warning — the repo currently has
+  # a pre-existing `brews:` deprecation (goreleaser pushes homebrew_casks) whose
+  # migration is its own change, and we don't want it to mask future signs:/
+  # build: validation failures.
+  goreleaser-check:
+    name: goreleaser check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+      - name: goreleaser check (fail on invalid config; warn on deprecations)
+        shell: bash
+        run: |
+          set +e
+          goreleaser check
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then exit 0; fi
+          if [ "$code" -eq 2 ]; then
+            echo "::warning::.goreleaser.yml is valid but uses deprecated properties — migrate when convenient"
+            exit 0
+          fi
+          echo "goreleaser check failed: .goreleaser.yml is invalid (exit $code)"
+          exit 1

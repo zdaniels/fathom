@@ -1,0 +1,17 @@
+name: file-editor
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Read, write, and list files within the workspace directory
+
+permissions:
+  filesystem: read-write
+  network: none
+  shell: none
+  memory: own
+
+category: productivity
+tags:
+  - files
+  - editor
+  - workspace

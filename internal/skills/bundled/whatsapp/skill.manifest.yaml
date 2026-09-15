@@ -1,0 +1,58 @@
+name: whatsapp
+version: "2.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: WhatsApp messaging via Baileys with QR-pair authentication. After pairing once, the linked-device session persists across restarts.
+category: communication
+tags:
+  - whatsapp
+  - messaging
+  - baileys
+permissions:
+  network:
+    - GET https://web.whatsapp.com/*
+    - GET https://mmg.whatsapp.net/*
+    - POST https://mmg.whatsapp.net/*
+    - GET https://*.whatsapp.net/*
+    - POST https://*.whatsapp.net/*
+  filesystem: read-write
+  shell: none
+  memory: own
+tools:
+  - name: send_message
+    function: send_message
+    description: "Send a WhatsApp message to a phone number or chat. The 'to' field accepts a bare phone number with country code (e.g. '17205551234'), a WhatsApp JID like '17205551234@s.whatsapp.net', or a group JID like '12345@g.us'. The 'text' field is the message body."
+    parameters:
+      type: object
+      properties:
+        to:
+          type: string
+          description: "Recipient phone number with country code, or WhatsApp JID. Examples: '17205551234', '17205551234@s.whatsapp.net'."
+        text:
+          type: string
+          description: "Message body, plain text."
+      required: [to, text]
+  - name: list_chats
+    function: list_chats
+    description: "List recent WhatsApp chats (one-to-ones and groups) with the most-recent message preview, ordered by recency."
+    parameters:
+      type: object
+      properties:
+        limit:
+          type: number
+          description: "Maximum number of chats to return. Default 20."
+      required: []
+  - name: get_me
+    function: get_me
+    description: "Return the WhatsApp identity of the currently-paired account — the JID and display name. Useful as a sanity check that the pair is alive."
+    parameters:
+      type: object
+      properties: {}
+      required: []
+  - name: pair
+    function: pair
+    description: "Initiate a fresh QR pair flow. Almost never needed at runtime — pairing happens once via 'fathom install whatsapp'. Only call this if get_me reports the session is dead."
+    parameters:
+      type: object
+      properties: {}
+      required: []

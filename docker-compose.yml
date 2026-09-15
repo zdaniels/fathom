@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  fathom:
+    build: .
+    container_name: fathom
+    restart: unless-stopped
+    ports:
+      - "8790:8790"
+    volumes:
+      - fathom-data:/data
+      - ./fathom.policy.yaml:/app/fathom.policy.yaml:ro
+    environment:
+      - FANTAZM_HOST=0.0.0.0
+      - FANTAZM_PORT=8790
+      - FANTAZM_DATA_DIR=/data
+      - FANTAZM_LOG_LEVEL=info
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M
+
+volumes:
+  fathom-data:

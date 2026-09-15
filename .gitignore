@@ -1,0 +1,41 @@
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Go build artifacts
+/fathom
+/fathom-*
+*.test
+*.out
+coverage.*
+
+# Local runtime data
+data/
+fathom.db
+fathom.db-*
+*.log
+
+# OS / IDE
+.DS_Store
+.claude/
+
+# Node skill workspaces — runner.js drops these on first use
+/skills/*/node_modules
+/runner/node_modules
+
+# Goreleaser build output
+/dist/
+
+# macOS app build artifacts
+apps/macos/.build/
+apps/macos/build/
+apps/macos/.swiftpm/
+apps/macos/Package.resolved
+
+# Runtime skill installs (the skill source ships embedded in the Go binary
+# via internal/skills/bundled/; apps/macos/skills/ only appears if you run
+# `fathom install <skill>` while cwd'd into apps/macos/).
+apps/macos/skills/

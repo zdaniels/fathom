@@ -1,0 +1,35 @@
+name: browser
+version: "2.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Real headless Chromium via Playwright — navigate, click, type, scroll, screenshot, snapshot. Persistent browser state across tool calls so multi-step flows (login → fill form → submit) work.
+category: web
+tags:
+  - browser
+  - automation
+  - playwright
+  - web
+permissions:
+  network:
+    - GET https://*/*
+    - POST https://*/*
+  filesystem: read-write
+  shell: none
+  memory: own
+tools:
+  - name: navigate
+    function: navigate
+  - name: snapshot
+    function: snapshot
+  - name: click
+    function: click
+  - name: type_text
+    function: type_text
+  - name: read_page
+    function: read_page
+  - name: screenshot
+    function: screenshot
+  - name: scroll
+    function: scroll
+  - name: close
+    function: close

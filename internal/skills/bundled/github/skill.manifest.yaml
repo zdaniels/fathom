@@ -1,0 +1,106 @@
+name: github
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Manage GitHub repositories, issues, pull requests and notifications
+category: development
+tags:
+  - github
+  - git
+  - code
+  - issues
+  - pull-requests
+permissions:
+  network:
+    - GET https://api.github.com/*
+    - POST https://api.github.com/*
+    - PATCH https://api.github.com/*
+    - PUT https://api.github.com/*
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - GITHUB_TOKEN
+tools:
+  - name: list_repos
+    function: listRepos
+    description: List GitHub repositories
+    parameters:
+      type: object
+      properties:
+        org: { type: string, description: "Organization name" }
+        user: { type: string, description: "Username" }
+      required: []
+  - name: get_issues
+    function: getIssues
+    description: Get issues for a repository
+    parameters:
+      type: object
+      properties:
+        owner: { type: string }
+        repo: { type: string }
+        state: { type: string, description: "open|closed|all" }
+      required: [owner, repo]
+  - name: create_issue
+    function: createIssue
+    description: Create a new issue
+    parameters:
+      type: object
+      properties:
+        owner: { type: string }
+        repo: { type: string }
+        title: { type: string }
+        body: { type: string }
+        labels: { type: array, items: { type: string } }
+      required: [owner, repo, title]
+  - name: get_pull_requests
+    function: getPullRequests
+    description: Get pull requests for a repository
+    parameters:
+      type: object
+      properties:
+        owner: { type: string }
+        repo: { type: string }
+        state: { type: string, description: "open|closed|all" }
+      required: [owner, repo]
+  - name: search_code
+    function: searchCode
+    description: Search code on GitHub
+    parameters:
+      type: object
+      properties:
+        query: { type: string }
+      required: [query]
+  - name: get_notifications
+    function: getNotifications
+    description: Get GitHub notifications
+    parameters:
+      type: object
+      properties:
+        all: { type: boolean, description: "Include read notifications" }
+      required: []
+  - name: create_repo
+    function: createRepo
+    description: Create a new GitHub repository (private by default)
+    parameters:
+      type: object
+      properties:
+        name: { type: string }
+        org: { type: string, description: "Org to create under; omit for your personal account" }
+        private: { type: boolean, description: "default true" }
+        description: { type: string }
+        autoInit: { type: boolean, description: "create an initial commit + default branch; default true" }
+      required: [name]
+  - name: create_or_update_file
+    function: createOrUpdateFile
+    description: Create or update a file in a repo and commit it (write+push via the GitHub API, no local clone needed)
+    parameters:
+      type: object
+      properties:
+        owner: { type: string }
+        repo: { type: string }
+        path: { type: string, description: "file path in the repo, e.g. src/app.py" }
+        content: { type: string, description: "full file contents (UTF-8 text)" }
+        message: { type: string, description: "commit message" }
+        branch: { type: string, description: "target branch; defaults to the repo default" }
+      required: [owner, repo, path, content, message]

@@ -1,0 +1,47 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/zdaniels/fathom
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8790
+
+resources:
+  limits:
+    cpu: "1"
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# Deployment mode. Drives which features mount at startup:
+#   personal   — single user, no admin API, no SSO. Default.
+#   team       — multitenancy + admin API + RBAC.
+#   enterprise — team + SSO/OIDC + compliance exports (configure
+#                FANTAZM_OIDC_* env or a mounted fathom.config.yaml).
+mode: personal
+
+auth:
+  mode: token
+
+encryption:
+  kms: none
+
+audit:
+  siem: none
+
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

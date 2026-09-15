@@ -1,0 +1,16 @@
+name: notes
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Encrypted personal knowledge base with tagging and full-text search
+category: productivity
+tags:
+  - notes
+  - knowledge
+  - memory
+  - search
+permissions:
+  network: none
+  filesystem: none
+  shell: none
+  memory: own

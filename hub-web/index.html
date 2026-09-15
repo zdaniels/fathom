@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ironclaw Secure Hub</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <div class="logo">
+      <span class="logo-icon">&#x1f6e1;</span>
+      <h1>Ironclaw <span class="accent">Secure Hub</span></h1>
+    </div>
+    <nav>
+      <a href="#" onclick="showView('browse')" class="nav-link active" id="nav-browse">Browse</a>
+      <a href="#" onclick="showView('categories')" class="nav-link" id="nav-categories">Categories</a>
+      <a href="#" onclick="showView('stats')" class="nav-link" id="nav-stats">Stats</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div id="view-browse" class="view active">
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Search skills..." autocomplete="off" />
+      <select id="sort-select">
+        <option value="downloads">Most Popular</option>
+        <option value="recent">Most Recent</option>
+        <option value="name">Name A-Z</option>
+      </select>
+      <label class="checkbox-label">
+        <input type="checkbox" id="verified-only" /> Verified only
+      </label>
+    </div>
+    <div id="skills-grid" class="skills-grid"></div>
+    <div id="load-more" class="load-more" style="display:none">
+      <button onclick="loadMore()">Load More</button>
+    </div>
+  </div>
+
+  <div id="view-detail" class="view">
+    <button class="back-btn" onclick="showView('browse')">&larr; Back to Hub</button>
+    <div id="skill-detail"></div>
+  </div>
+
+  <div id="view-categories" class="view">
+    <h2>Categories</h2>
+    <div id="categories-grid" class="categories-grid"></div>
+  </div>
+
+  <div id="view-stats" class="view">
+    <h2>Hub Statistics</h2>
+    <div id="stats-cards" class="stats-cards"></div>
+  </div>
+</main>
+
+<footer>
+  <p>Ironclaw Secure Hub &mdash; Every skill verified. Every action audited.</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

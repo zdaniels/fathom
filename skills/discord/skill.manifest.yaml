@@ -1,0 +1,53 @@
+name: discord
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Read and send messages in Discord servers via REST API
+category: communication
+tags:
+  - discord
+  - messaging
+  - gaming
+permissions:
+  network:
+    - GET https://discord.com/api/*
+    - POST https://discord.com/api/*
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - DISCORD_BOT_TOKEN
+tools:
+  - name: send_message
+    function: sendMessage
+    description: Send a message to a Discord channel
+    parameters:
+      type: object
+      properties:
+        channelId: { type: string }
+        content: { type: string }
+      required: [channelId, content]
+  - name: read_messages
+    function: readMessages
+    description: Read messages from a Discord channel
+    parameters:
+      type: object
+      properties:
+        channelId: { type: string }
+        limit: { type: number, description: "Default 50" }
+      required: [channelId]
+  - name: list_guilds
+    function: listGuilds
+    description: List Discord guilds the bot is in
+    parameters:
+      type: object
+      properties: {}
+      required: []
+  - name: list_channels
+    function: listChannels
+    description: List channels in a Discord guild
+    parameters:
+      type: object
+      properties:
+        guildId: { type: string }
+      required: [guildId]

@@ -1,0 +1,75 @@
+# Example fathom-gateway config. Copy to /etc/fathom-gateway/config.yaml
+# (or pass --config /path/to/this/file) and edit for your environment.
+#
+# Schema lives in internal/llmproxy/config.go — every field here is
+# documented in that file.
+
+listen: ":8791"
+
+# Audit: v0.1 supports "stdout" (entries printed as slog lines) only.
+# OTLP + file sinks land in v0.2.
+audit:
+  sink: stdout
+  maxEntries: 10000
+
+# Upstream providers. Name is the local alias you reference from
+# tenant allowedModels. baseUrl must point at the upstream's
+# OpenAI-compatible /v1 root. authStyle defaults to "bearer".
+providers:
+  - name: anthropic
+    baseUrl: https://api.anthropic.com/v1/openai     # Anthropic's OpenAI-compat shim
+    authStyle: x-api-key
+    apiKey: { env: ANTHROPIC_API_KEY }
+
+  - name: openai
+    baseUrl: https://api.openai.com/v1
+    apiKey: { env: OPENAI_API_KEY }
+
+  - name: deepseek
+    baseUrl: https://api.deepseek.com/v1
+    apiKey: { env: DEEPSEEK_API_KEY }
+
+  - name: groq
+    baseUrl: https://api.groq.com/openai/v1
+    apiKey: { env: GROQ_API_KEY }
+
+  # Self-hosted Llama on the company's vLLM cluster — no public key,
+  # internal network only.
+  - name: internal-llama
+    baseUrl: https://llm.internal.acme.com/v1
+    apiKey: { env: INTERNAL_LLAMA_KEY }
+
+# Tenants. allowedModels are globs over "<provider>/<model>". The
+# literal "*" matches any model (use sparingly — admin tier only).
+tenants:
+  - id: engineering
+    bearerTokens:
+      - { env: ENG_TEAM_TOKEN }
+    allowedModels:
+      - "anthropic/*"
+      - "openai/gpt-4*"
+      - "internal-llama/*"
+    quotas:
+      tokensPerDay: 5000000
+      requestsPerMinute: 600
+
+  - id: marketing
+    bearerTokens:
+      - { env: MARKETING_TOKEN }
+    allowedModels:
+      - "openai/gpt-4o-mini"
+      - "anthropic/claude-haiku-*"
+    quotas:
+      tokensPerDay: 200000
+      requestsPerMinute: 60
+
+  # Tenants whose id starts with "admin" can see /admin/usage globally.
+  - id: admin-platform
+    bearerTokens:
+      - { env: ADMIN_PLATFORM_TOKEN }
+    allowedModels:
+      - "*"
+
+auth:
+  bearer:
+    enabled: true

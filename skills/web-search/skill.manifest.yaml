@@ -1,0 +1,19 @@
+name: web-search
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Search the web using DuckDuckGo and return summarized results
+
+permissions:
+  network:
+    - "GET https://html.duckduckgo.com/*"
+    - "GET https://api.duckduckgo.com/*"
+  filesystem: none
+  shell: none
+  memory: own
+
+category: search
+tags:
+  - web
+  - search
+  - duckduckgo

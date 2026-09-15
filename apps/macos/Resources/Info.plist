@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>ai.darklake.fathom</string>
+  <key>CFBundleName</key>
+  <string>Fathom</string>
+  <key>CFBundleDisplayName</key>
+  <string>Fathom</string>
+  <key>CFBundleExecutable</key>
+  <string>Fathom</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>FTLM</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.3.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <!-- LSUIElement: don't show in Dock or app switcher. We're a menu-bar
+       app, not a window app. -->
+  <key>LSUIElement</key>
+  <true/>
+  <!-- App Sandbox is opt-in here so the prod release can be MAS-eligible
+       later if you want. For now we don't enable it because Carbon
+       hotkey registration + arbitrary localhost networking are awkward
+       in a sandboxed app. -->
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <!-- Microphone usage description — future versions add dictation via
+       the Speech framework. Required even if the feature is opt-in
+       because the framework can lazily request permission. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Fathom uses the microphone when you dictate into the chat. Audio never leaves your machine — Apple's on-device Speech framework does the transcription locally.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Fathom uses on-device speech recognition to transcribe your dictation into chat input.</string>
+  <!-- AppleScript automation usage description. The agent uses this
+       when it calls the system_run tool. -->
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Fathom uses AppleScript automation to drive other apps (Calendar, Messages, etc.) on your behalf when the agent calls the system_run tool.</string>
+
+  <!-- Sparkle auto-update.
+       SUFeedURL: where the app polls for an appcast.xml manifest. Until
+       we publish signed releases this URL 404s and Sparkle quietly does
+       nothing (no popup, no error). After you set up signing + publish
+       the first appcast, leave this URL stable — Sparkle uses it for
+       the lifetime of installed clients.
+       SUPublicEDKey: the EdDSA public key matching the private key used
+       to sign update .zips. Generate the pair via Sparkle's `generate_keys`
+       tool; paste the public half here. Empty string disables signature
+       verification (NEVER ship like that). -->
+  <key>SUFeedURL</key>
+  <string>https://fathom.darklake.ai/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string></string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SUScheduledCheckInterval</key>
+  <integer>86400</integer>
+</dict>
+</plist>

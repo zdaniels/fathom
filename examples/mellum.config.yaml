@@ -1,0 +1,63 @@
+# Running JetBrains Mellum-2 with fathom
+# ====================================
+#
+# Mellum-2 (https://huggingface.co/collections/JetBrains/mellum-2) is a family
+# of Apache-2.0 MoE models (12B total / 2.5B active). The *-Instruct and
+# *-Thinking variants are chat + tool-calling capable, so they can drive fathom's
+# agent loop; the *-Base / *-Pretrain variants are not chat models.
+#
+# As of this writing the weights are NOT served by HuggingFace's serverless
+# Inference Providers router, so `provider: huggingface` (which targets
+# router.huggingface.co) will NOT reach them. The supported path is to
+# self-host with vLLM and point fathom at your local OpenAI-compatible endpoint.
+#
+# 1. Download the weights (~24GB for the 12B MoE in bf16) — NOT into this repo:
+#
+#      pip install -U "huggingface_hub[cli]"
+#      hf download JetBrains/Mellum2-12B-A2.5B-Instruct \
+#        --local-dir ~/models/Mellum2-12B-A2.5B-Instruct
+#
+# 2. Serve it with vLLM (exposes an OpenAI-compatible API on :8000):
+#
+#      pip install vllm
+#      vllm serve ~/models/Mellum2-12B-A2.5B-Instruct \
+#        --served-model-name mellum2-instruct \
+#        --max-model-len 131072 \
+#        --enable-auto-tool-choice \
+#        --tool-call-parser hermes
+#
+# 3. Point fathom at it (this file). `provider: lmstudio` is just the keyless
+#    OpenAI-compatible client; we only override baseUrl to hit vLLM. You could
+#    equally use `provider: openai` with a dummy OPENAI_API_KEY, or
+#    `provider: huggingface` with `baseUrl` overridden — all three speak the
+#    same wire format.
+
+mode: personal
+host: 127.0.0.1
+port: 8790
+dataDir: ./data
+
+llm:
+  provider: lmstudio                       # keyless OpenAI-compatible client
+  model: mellum2-instruct                  # must match --served-model-name
+  baseUrl: http://localhost:8000/v1        # your local vLLM server
+
+# --- Alternative: a HuggingFace-router-hosted model as the default brain ---
+# When the model you want IS on the serverless router, no self-hosting needed.
+# Set HF_TOKEN in the vault (`fathom vault set HF_TOKEN hf_...`) and use:
+#
+# llm:
+#   provider: huggingface
+#   model: deepseek-ai/DeepSeek-R1          # optionally :cheapest / :provider
+#
+# --- Multi-model: Mellum for code, a hosted model for general chat ---
+# llm:
+#   default: general
+#   models:
+#     general:
+#       provider: huggingface
+#       model: deepseek-ai/DeepSeek-R1
+#     code:
+#       provider: lmstudio
+#       model: mellum2-instruct
+#       baseUrl: http://localhost:8000/v1

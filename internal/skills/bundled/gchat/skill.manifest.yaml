@@ -1,0 +1,30 @@
+name: gchat
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Google Chat (Workspace) — send and read messages in spaces and DMs via the Chat REST API.
+category: communication
+tags:
+  - gchat
+  - google
+  - workspace
+  - messaging
+permissions:
+  network:
+    - GET https://chat.googleapis.com/*
+    - POST https://chat.googleapis.com/*
+    - POST https://oauth2.googleapis.com/*
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - GCHAT_CLIENT_ID
+    - GCHAT_CLIENT_SECRET
+    - GCHAT_REFRESH_TOKEN
+tools:
+  - name: send_message
+    function: send_message
+  - name: list_spaces
+    function: list_spaces
+  - name: list_messages
+    function: list_messages

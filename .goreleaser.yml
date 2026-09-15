@@ -1,0 +1,136 @@
+## Goreleaser config — produces cross-platform static binaries + GitHub
+## release artifacts on every `git tag vX.Y.Z && git push --tags`.
+##
+## CI: .github/workflows/release.yml runs `goreleaser release --clean`.
+## Local: `goreleaser release --snapshot --clean` for a dry run.
+
+version: 2
+
+project_name: fathom
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: fathom
+    main: ./cmd/fathom
+    binary: fathom
+    env:
+      - CGO_ENABLED=0   # modernc.org/sqlite is pure Go
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.buildDate={{.Date}}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64  # node binary harder to come by on win-arm64
+  # fathom-gateway: the standalone LLM proxy binary. Shares all of
+  # internal/ with fathom but ships as its own artifact so enterprise
+  # security reviewers audit a smaller surface — no agent loop, no
+  # skills, no scheduler.
+  - id: fathom-gateway
+    main: ./cmd/fathom-gateway
+    binary: fathom-gateway
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.buildDate={{.Date}}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: fathom
+    ids: [fathom]
+    formats: [tar.gz]
+    name_template: >-
+      fathom_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README.md
+  - id: fathom-gateway
+    ids: [fathom-gateway]
+    formats: [tar.gz]
+    name_template: >-
+      fathom-gateway_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+
+# Sign the checksum file with cosign keyless (Sigstore). checksums.txt hashes
+# every released artifact, so a single signature over it transitively covers
+# the whole release. Keyless means NO private key to store or rotate: the
+# signature is bound to this repo's GitHub Actions OIDC identity and recorded
+# in the public Rekor transparency log. Produces checksums.txt.sig (signature)
+# and checksums.txt.pem (the ephemeral signing cert), both attached to the
+# Release. Requires `id-token: write` perms + cosign on PATH in release.yml.
+#
+# Verify a download with (identity pinned to the release workflow + a v* tag,
+# anchored — so only this repo's release.yml is trusted, not any workflow):
+#   cosign verify-blob \
+#     --certificate checksums.txt.pem --signature checksums.txt.sig \
+#     --certificate-identity-regexp '^https://github\.com/zdaniels/fathom/\.github/workflows/release\.yml@refs/tags/v.*$' \
+#     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+#     checksums.txt
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^style:"
+
+release:
+  github:
+    owner: zdaniels
+    name: fathom
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  header: |
+    ## Fathom v{{ .Version }}
+    Single-binary install:
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/zdaniels/fathom/main/install.sh | sh
+    ```

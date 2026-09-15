@@ -1,0 +1,60 @@
+name: gmail
+version: "1.0.0"
+author: fathom-team
+signature: ed25519:builtin
+description: Read, send, search and summarize Gmail emails via OAuth2
+
+permissions:
+  network:
+    - "GET https://gmail.googleapis.com/*"
+    - "POST https://gmail.googleapis.com/*"
+    - "POST https://oauth2.googleapis.com/*"
+  filesystem: none
+  shell: none
+  memory: own
+  secrets:
+    - GMAIL_CLIENT_ID
+    - GMAIL_CLIENT_SECRET
+    - GMAIL_REFRESH_TOKEN
+tools:
+  - name: list_emails
+    function: listEmails
+    description: "List Gmail messages with from/subject/date/snippet per item — use this for 'show me my recent emails' requests; you do NOT need to call read_email afterwards unless the user explicitly asks for the full body of one"
+    parameters:
+      type: object
+      properties:
+        query: { type: string, description: "Gmail search query, e.g. 'is:unread', 'from:alice@example.com'. Empty = all mail." }
+        maxResults: { type: number, description: "Default 10" }
+      required: []
+  - name: read_email
+    function: readEmail
+    description: Read a single email by ID
+    parameters:
+      type: object
+      properties:
+        messageId: { type: string }
+      required: [messageId]
+  - name: send_email
+    function: sendEmail
+    description: Send an email
+    parameters:
+      type: object
+      properties:
+        to: { type: string }
+        subject: { type: string }
+        body: { type: string }
+      required: [to, subject, body]
+  - name: search_emails
+    function: searchEmails
+    description: Search Gmail messages
+    parameters:
+      type: object
+      properties:
+        query: { type: string }
+      required: [query]
+
+category: communication
+tags:
+  - email
+  - gmail
+  - google

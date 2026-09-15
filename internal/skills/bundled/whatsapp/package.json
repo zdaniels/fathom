@@ -1,0 +1,15 @@
+{
+  "name": "fathom-skill-whatsapp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fathom WhatsApp skill — Baileys integration with QR-pair authentication.",
+  "scripts": {
+    "fantazm:postinstall": "echo 'whatsapp: pair your phone by running fathom install whatsapp again, then scanning the QR code'"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc13",
+    "qrcode-terminal": "0.12.0",
+    "pino": "9.0.0"
+  }
+}
