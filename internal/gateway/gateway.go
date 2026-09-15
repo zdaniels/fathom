@@ -426,6 +426,9 @@ func (g *Gateway) Stop(ctx context.Context) error {
 		if g.ThreadHub != nil {
 			g.ThreadHub.Close()
 		}
+		if board, ok := g.boardHandler.(interface{ StopStreams() }); ok {
+			board.StopStreams()
+		}
 		if g.server != nil {
 			if err := g.server.Shutdown(ctx); err != nil {
 				g.stopErr = err

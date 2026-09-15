@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 22
       - name: Browser chat regression tests
-        run: node --test internal/gateway/web/chat.test.cjs
+        run: node --test internal/gateway/web/*.test.cjs
       - name: go vet
         run: go vet ./...
       - name: go build

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,13 +21,22 @@ type Service struct {
 	Lookup             func(string) (string, error)
 	mu                 sync.Mutex
 	runs               map[string]context.CancelFunc
+	subscribers        map[string]map[chan struct{}]bool
 	wg                 sync.WaitGroup
 	closed             bool
+	streamsStopped     bool
 }
 
 func (s *Service) Close() {
 	s.mu.Lock()
 	s.closed = true
+	s.streamsStopped = true
+	for _, clients := range s.subscribers {
+		for ch := range clients {
+			close(ch)
+		}
+	}
+	s.subscribers = nil
 	for _, cancel := range s.runs {
 		cancel()
 	}
@@ -104,6 +114,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	role := s.Store.Role(workspace, user)
 	if role == "" {
 		fail(w, 404, errors.New("workspace not found"))
+		return
+	}
+	if r.Method == "GET" && len(parts) == 2 && parts[1] == "events" {
+		s.stream(w, r, workspace, user)
 		return
 	}
 	if r.Method == "GET" && len(parts) == 1 {
@@ -199,6 +213,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				fail(w, 403, err)
 				return
 			}
+			s.notifyLocked(workspace)
 			respond(w, 200, map[string]bool{"ok": true})
 			return
 		case "tasks":
@@ -221,6 +236,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, err)
 				return
 			}
+			s.notifyLocked(workspace)
 			respond(w, 201, t)
 			return
 		case "import":
@@ -258,6 +274,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, err)
 				return
 			}
+			s.notifyLocked(workspace)
 			respond(w, 201, t)
 			return
 		}
@@ -283,7 +300,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Revision != t.Revision {
+	if parts[3] != "comment" && in.Revision != t.Revision {
 		fail(w, 409, ErrConflict)
 		return
 	}
@@ -292,6 +309,15 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := parts[3]
+	if action == "comment" {
+		if err = s.Store.AddComment(workspace, t.ID, user, in.Text); err != nil {
+			fail(w, 400, err)
+			return
+		}
+		s.notifyLocked(workspace)
+		respond(w, 201, map[string]string{"status": "Comment added."})
+		return
+	}
 	if t.State == "running" {
 		if action != "cancel" {
 			fail(w, 409, errors.New("wait for the active run or cancel it first"))
@@ -321,11 +347,6 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.State = "backlog"
 	case "ready":
 		t.State = "ready"
-	case "comment":
-		if strings.TrimSpace(in.Text) == "" {
-			fail(w, 400, errors.New("comment is empty"))
-			return
-		}
 	case "changes":
 		t.State = "ready"
 		t.Review += "\nHuman requested changes: " + in.Text
@@ -379,6 +400,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.runs[t.ID] = cancel
 		s.wg.Add(1)
 		go s.run(ctx, cancel, t, action == "review", user, previousReview)
+		s.notifyLocked(workspace)
 		respond(w, 202, t)
 		return
 	case "publish":
@@ -406,6 +428,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, err)
 		return
 	}
+	s.notifyLocked(workspace)
 	respond(w, 200, t)
 }
 func (s *Service) connector(workspace, provider string) *Connector {
@@ -421,7 +444,27 @@ func (s *Service) run(ctx context.Context, cancel context.CancelFunc, t Task, re
 	defer cancel()
 	promptTask := t
 	promptTask.Review = previousReview
-	result, err := s.Runner.RunWithEvidence(ctx, promptTask, review, func() bool {
+	result, err := s.Runner.runWithProgress(ctx, promptTask, review, func(c CommandRecord) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return
+		}
+		role := "Builder"
+		if review {
+			role = "Reviewer"
+		}
+		command := strings.SplitN(c.Command, "\n", 2)[0]
+		if len(command) > 160 {
+			command = command[:160] + "…"
+		}
+		text := fmt.Sprintf("%s %s finished with exit %d (%.1fs): %s", role, c.Kind, c.ExitCode, float64(c.DurationMS)/1000, command)
+		if err := s.Store.AddProgress(t.WorkspaceID, t.ID, "agent:"+user, text); err != nil {
+			slog.Error("failed to save run activity", "task", t.ID, "err", err)
+			return
+		}
+		s.notifyLocked(t.WorkspaceID)
+	}, func() bool {
 		role := s.Store.Role(t.WorkspaceID, user)
 		return role == "member" || role == "admin"
 	})
@@ -449,5 +492,7 @@ func (s *Service) run(ctx context.Context, cancel context.CancelFunc, t Task, re
 	}
 	if _, err := s.Store.Save(t, "agent:"+user, kind, text); err != nil {
 		slog.Error("failed to persist task outcome", "task", t.ID, "err", err)
+	} else {
+		s.notifyLocked(t.WorkspaceID)
 	}
 }

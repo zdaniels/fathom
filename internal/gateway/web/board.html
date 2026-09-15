@@ -32,6 +32,7 @@
         ><button>Create workspace</button>
       </form>
       <p id="run-setup" class="muted"></p>
+      <p id="live-status" class="muted" role="status"></p>
       <div id="workspace-content" hidden>
         <section>
           <h2>New task</h2>
@@ -145,6 +146,10 @@
           maxlength="64000"
         ></textarea>
       </label>
+      <p class="muted">
+        Shared discussion. Comments do not interrupt or change an active agent
+        run.
+      </p>
       <div class="actions">
         <button data-action="comment">Add comment</button
         ><button data-action="changes">Request changes</button

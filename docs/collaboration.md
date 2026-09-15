@@ -19,8 +19,33 @@ Tasks move through backlog, ready, running, review, blocked, and done. A new
 builder run invalidates the previous review. Editing the brief invalidates both
 handoff and review. Concurrent updates use revisions: a stale edit returns HTTP
 409 instead of overwriting a teammate's changes. Only one run can write a workspace
-at a time. The board refreshes every four seconds and records persistent activity.
+at a time. The board receives live updates and records persistent activity.
 Private chat history remains private; adding workspace members does not share it.
+
+## Discuss work while agents run
+
+Members can add comments while a builder or reviewer is running. Comments are
+shared discussion; they do not interrupt the model or change an active run's
+instructions. Use **Request changes** after the run to give the next builder
+feedback. Task edits and other state changes remain blocked during execution.
+
+The board displays **Live updates connected** when its authenticated event stream
+is open. Comments, task changes, membership changes, and completed shell/test
+commands trigger a fresh workspace snapshot. Command activity includes the role,
+command preview, exit status and duration; full bounded output remains in the
+run evidence after completion. No model thinking or private chat is shared.
+
+A connection loss triggers a retry after two seconds; reconnecting fetches current
+state so missed changes are recovered. A 30-second poll is a fallback while the
+stream is unavailable. Updates preserve in-progress comment drafts and unsaved
+idle task edits. A teammate's task edit still requires reopening before your own
+edit can be saved. Comments append independently of task revisions, so discussion
+cannot overwrite or prevent an agent's result from being saved.
+
+Streams are workspace-scoped, limited to 128 connections per gateway, and recheck
+the token and membership before each notification and every 15-second heartbeat.
+Loss of access ends the stream. Gateway shutdown closes streams before draining
+HTTP requests. Each reconnect starts from a fresh snapshot, not an event replay.
 
 ## Review changes and test results
 
@@ -188,19 +213,22 @@ All board endpoints use the same Fathom bearer token as chat.
 | POST | `/{workspace}/members` | `{ "userId": "…", "role": "member" }`; empty role removes |
 | POST | `/{workspace}/tasks` | Title, description, assignee, builder, reviewer |
 | POST | `/{workspace}/import` | `{ "provider": "linear", "id": "TEAM-123" }` |
-| POST | `/{workspace}/tasks/{task}/{action}` | Current `revision`, optional `text`; edit also takes task fields |
+| POST | `/{workspace}/tasks/{task}/{action}` | Current `revision` (not required for comment), optional `text`; edit also takes task fields |
+| GET | `/{workspace}/events` | Authenticated SSE invalidations; fetch workspace snapshot on `changed` |
 | GET | `/{workspace}/tasks/{task}/evidence` | Latest applicable builder/reviewer file changes and command records |
 | GET | `/{workspace}/archive` | Workspace `.tar.gz` |
 
 Actions: `edit`, `ready`, `comment`, `changes`, `build`, `review`, `cancel`,
-`approve`, `publish`. Builder/reviewer starts return 202. Only cancellation is
-accepted during an active run. Read responses contain up to 1,000 tasks and the
+`approve`, `publish`. Builder/reviewer starts return 202. Comments and cancellation are
+accepted during an active run. A comment returns 201 with a status message and
+does not increment the task revision. Read responses contain up to 1,000 tasks and the
 200 most recent activity records; older activity remains in the database.
 
 ## Tests
 
 ```sh
 go test -race ./internal/collab
+node --test internal/gateway/web/*.test.cjs
 FATHOM_TEST_WORKSPACE_IMAGE=fathom:local go test -race -run TestWorkspaceContainers ./internal/collab
 ```
 

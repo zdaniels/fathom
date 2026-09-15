@@ -64,7 +64,10 @@ func (r *Runner) Run(ctx context.Context, t Task, review bool, authorized ...fun
 	result, err := r.RunWithEvidence(ctx, t, review, authorized...)
 	return result.Handoff, err
 }
-func (r *Runner) RunWithEvidence(ctx context.Context, t Task, review bool, authorized ...func() bool) (result RunResult, runErr error) {
+func (r *Runner) RunWithEvidence(ctx context.Context, t Task, review bool, authorized ...func() bool) (RunResult, error) {
+	return r.runWithProgress(ctx, t, review, nil, authorized...)
+}
+func (r *Runner) runWithProgress(ctx context.Context, t Task, review bool, progress func(CommandRecord), authorized ...func() bool) (result RunResult, runErr error) {
 	result.Evidence = Evidence{Revision: t.Revision, Role: "builder", StartedAt: time.Now().UTC(), Changes: []FileChange{}, Commands: []CommandRecord{}}
 	if review {
 		result.Evidence.Role = "reviewer"
@@ -198,6 +201,9 @@ func (r *Runner) RunWithEvidence(ctx context.Context, t Task, review bool, autho
 					record.Truncated = true
 				}
 				result.Evidence.Commands = append(result.Evidence.Commands, record)
+				if progress != nil {
+					progress(record)
+				}
 				toolErr := toolCtx.Err()
 				cancel()
 				if toolErr != nil {

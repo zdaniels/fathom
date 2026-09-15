@@ -66,9 +66,13 @@ node -e 'const s=require("net").connect(443,"1.1.1.1");s.on("connect",()=>proces
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	script = base + "echo alpha > /workspace/alpha\necho BOUNDARY_OK\n"
-	built, err := runner.RunWithEvidence(ctx, Task{WorkspaceID: a, Title: "Build"}, false)
+	var progress []CommandRecord
+	built, err := runner.runWithProgress(ctx, Task{WorkspaceID: a, Title: "Build"}, false, func(c CommandRecord) { progress = append(progress, c) })
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(progress) != 1 || progress[0].ExitCode != 0 {
+		t.Fatalf("missing command progress: %+v", progress)
 	}
 	if built.Evidence.Warning != "" || len(built.Evidence.Changes) != 1 || built.Evidence.Changes[0].After != "alpha\n" || built.Evidence.Commands[0].ExitCode != 0 {
 		t.Fatalf("bad build evidence: %+v", built.Evidence)

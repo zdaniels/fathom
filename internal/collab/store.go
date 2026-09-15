@@ -342,3 +342,44 @@ func (s *Store) Recover() error {
 	}
 	return nil
 }
+
+// AddComment appends discussion without revising the task. A running agent can
+// therefore save its outcome using the revision it started with. Recheck the
+// membership in the same writer transaction as the append.
+func (s *Store) AddComment(workspace, task, user, text string) error {
+	if strings.TrimSpace(text) == "" || len(text) > 64000 {
+		return errors.New("comment must be 1–64000 bytes")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec("UPDATE tasks SET revision=revision WHERE workspace_id=? AND id=?", workspace, task)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n != 1 {
+		return errors.New("task not found")
+	}
+	var role string
+	if err = tx.QueryRow("SELECT role FROM members WHERE workspace_id=? AND user_id=?", workspace, user).Scan(&role); err != nil || (role != "member" && role != "admin") {
+		return ErrForbidden
+	}
+	if err = activity(tx, workspace, task, user, "comment", text); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Store) AddProgress(workspace, task, actor, text string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = activity(tx, workspace, task, actor, "command_completed", text); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
