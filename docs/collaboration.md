@@ -36,6 +36,36 @@ workspace; existing files and tasks are preserved. Files are initialized before
 the workspace and its tasks are committed together. Failed initialization is not
 published on the board.
 
+## Upload and browse a project
+
+Expand **Upload a project**, name the new workspace, select a `.zip`, and click
+**Create from ZIP**. Uploads always create a new workspace and never overwrite an
+existing one. Only users with workspace-creation permission can upload. Docker
+and `collaboration.image` are required. Creating a project does not run its code
+or start an agent; create a task with the outcome you want after uploading.
+
+ZIPs can contain up to 200 regular files and 400 total entries, with limits of
+16 MB for both the uploaded ZIP and expanded file content. Folder paths are
+preserved exactly, including any enclosing project folder. Links, special files,
+absolute paths, traversal paths, duplicate paths, and conflicting file/directory
+paths are rejected before initialization. Executable files retain execute bits;
+other permissions are normalized. ZIP ownership and special permission bits are
+not applied. Include needed dependencies for offline runs; uploads do not install
+packages or grant network access.
+
+Workspace members, including viewers, can click **Browse files**, filter by path,
+and select a file for a read-only text preview. Refresh loads a new snapshot.
+Snapshots may include concurrent agent writes and are not a transactional view of
+a running task. Browse supports 200 files and a 16 MB archive snapshot, with text
+previews capped at 32 KB per file and 1 MB total. Binary files, links, and larger
+text files show an unavailable-preview message. Use **Download workspace archive**
+for larger workspaces (up to its existing 32 MB compressed limit).
+
+Files are shared with workspace members. Preview contents are displayed as text,
+not executed as HTML, and are cleared when the dialog closes or workspace changes.
+No file editing, repository cloning, or automatic dependency installation is
+provided by this feature.
+
 ## Discuss work while agents run
 
 Members can add comments while a builder or reviewer is running. Comments are
@@ -141,12 +171,12 @@ Dockerfile, which creates `/workspace` owned by UID/GID 65532. That ownership is
 copied into each new workspace volume.
 
 The coordinating Fathom process calls the chosen LLM with its vault/environment
-credentials. The model's only tool is a shell in the task container. No host-agent
+credentials. The model's shell and test tools run in the task container. No host-agent
 tool registry, personal chat tools, Recall integration, or host filesystem is
 available to board workers. Each workspace starts empty; builders can create files
 from the task brief and continue from prior tasks' files. Download the result with
-**Download workspace archive** (32 MB compressed limit). Repository cloning,
-dependency downloads, and archive uploads are not provided by this offline runner.
+**Download workspace archive** (32 MB compressed limit). Use ZIP upload to create a populated workspace. Repository cloning and dependency
+downloads are not provided by this offline runner.
 
 ### Execution boundary
 
@@ -244,6 +274,8 @@ All board endpoints use the same Fathom bearer token as chat.
 | Method | Path after `/api/v1/board` | Body / result |
 | --- | --- | --- |
 | GET | empty | Member workspaces, available model names, run setup message, user ID |
+| POST | `/projects?name=…` | Raw ZIP body → a new workspace with imported files |
+| GET | `/{workspace}/files` | Sorted file paths and bounded text previews; workspace members only |
 | POST | `/demo` | `{}` → a new demo workspace with starter files and tasks |
 | POST | empty | `{ "name": "Team" }` → workspace |
 | GET | `/{workspace}` | Tasks, members, recent activity, non-secret connections |

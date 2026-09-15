@@ -114,11 +114,12 @@ async function setup() {
       if (options.method === "POST") {
         env.postURL = url;
         env.postHeaders = options.headers;
-        env.posted = JSON.parse(options.body);
+        env.posted = options.headers?.["Content-Type"] === "application/zip" ? options.body : JSON.parse(options.body);
         return new Promise((resolve) => {
           env.resolvePost = resolve;
         });
       }
+      if (url.endsWith("/files")) return env.filesResponse || { ok: true, json: async () => env.files || [] };
       if (url.endsWith("/connections"))
         return { ok: true, json: async () => env.connections || [] };
       if (url.endsWith("/evidence")) return { ok: true, json: async () => [] };
@@ -310,4 +311,64 @@ test("changing provider or closing setup clears the entered token", async () => 
   e.el("connection-close").onclick();
   assert.equal(e.el("connection-token").value, "");
   assert.equal(e.el("connections-dialog").open, false);
+});
+
+
+test("file browser renders paths and contents as text, filters, and clears on close", async () => {
+  const e = await setup();
+  e.files = [{path: "src/<script>.js", text: "<script>alert(1)</script>", preview: true}, {path: "image.bin", text: "", preview: false}];
+  await e.el("browse-files").onclick();
+  assert.equal(e.el("files-list").children.length, 2);
+  e.el("files-list").children[0].onclick();
+  assert.equal(e.el("file-preview").textContent, "<script>alert(1)</script>");
+  e.el("files-filter").value = "image";
+  e.el("files-filter").oninput();
+  assert.equal(e.el("files-list").children.length, 1);
+  e.el("files-list").children[0].onclick();
+  assert.match(e.el("file-preview").textContent, /Preview unavailable/);
+  e.el("files-close").onclick();
+  assert.equal(e.el("file-preview").textContent, "");
+  assert.equal(e.el("files-list").children.length, 0);
+});
+
+test("file results arriving after workspace change stay hidden", async () => {
+  const e = await setup();
+  let resolve;
+  e.filesResponse = {ok:true, json: () => new Promise(r => {resolve = r;})};
+  const pending = e.el("browse-files").onclick();
+  await tick();
+  e.el("workspace").value = "another";
+  e.el("workspace").onchange();
+  resolve([{path:"private.txt", text:"old workspace", preview:true}]);
+  await pending;
+  assert.equal(e.el("files-list").children.length, 0);
+  assert.equal(e.el("file-preview").textContent, "");
+});
+
+test("demo button submits explicitly and recovers from failure", async () => {
+  const e = await setup();
+  const pending = e.el("start-demo").onclick();
+  await tick();
+  assert.equal(e.postURL, "/api/v1/board/demo");
+  assert.equal(e.el("start-demo").disabled, true);
+  e.resolvePost({ok:false, json:async()=>({error:"Docker unavailable"})});
+  await pending;
+  assert.equal(e.el("start-demo").disabled, false);
+  assert.match(e.el("status").textContent, /Docker unavailable/);
+});
+
+test("ZIP upload sends the selected file and preserves it on failure", async () => {
+  const e = await setup();
+  const file = {size:10, name:"project.zip"};
+  e.el("project-name").value = "My project";
+  e.el("project-zip").files = [file];
+  const pending = e.el("project-upload-form").onsubmit({preventDefault(){}});
+  await tick();
+  assert.equal(e.postURL, "/api/v1/board/projects?name=My%20project");
+  assert.equal(e.posted, file);
+  e.resolvePost({ok:false,json:async()=>({error:"Unsafe ZIP"})});
+  await pending;
+  assert.equal(e.el("project-zip").files[0], file);
+  assert.equal(e.el("project-upload").disabled, false);
+  assert.match(e.el("status").textContent, /Unsafe ZIP/);
 });

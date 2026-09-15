@@ -21,6 +21,8 @@ type Service struct {
 	ConnectionClient     *http.Client
 	connectionMu         sync.Mutex
 	projectMu            sync.Mutex
+	uploadMu             sync.Mutex
+	filesMu              sync.Mutex
 	Store                *Store
 	Runner               *Runner
 	Auth                 func(*http.Request) (string, error)
@@ -118,6 +120,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 405, errors.New("GET or POST required"))
 		return
 	}
+	if path == "projects" {
+		s.uploadProject(w, r, user)
+		return
+	}
 	if path == "demo" {
 		s.createDemo(w, r, user)
 		return
@@ -126,6 +132,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	role := s.Store.Role(workspace, user)
 	if role == "" {
 		fail(w, 404, errors.New("workspace not found"))
+		return
+	}
+	if len(parts) == 2 && parts[1] == "files" {
+		s.browseFiles(w, r, workspace, user)
 		return
 	}
 	if len(parts) >= 2 && parts[1] == "connections" {

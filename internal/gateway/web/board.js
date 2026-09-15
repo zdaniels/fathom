@@ -118,6 +118,7 @@
     }
   }
   async function init() {
+    closeFiles();
     const data = await api();
     state.models = data.models;
     $("run-setup").textContent =
@@ -201,6 +202,7 @@
           state.workspace = "";
           $("task-dialog").close();
           closeConnections();
+          closeFiles();
           $("workspace-content").hidden = true;
           $("live-status").textContent =
             "Access ended. Sign in again or choose another workspace.";
@@ -695,6 +697,7 @@
     }
   };
   $("workspace").onchange = () => {
+    closeFiles();
     closeConnections();
     state.task = null;
     $("task-dialog").close();
@@ -772,6 +775,85 @@
   };
   $("task-dialog").onclose = () => {
     state.task = null;
+  };
+  let fileRecords = [], filesGeneration = 0;
+  function closeFiles() {
+    filesGeneration++;
+    fileRecords = [];
+    $("files-dialog").close();
+    $("files-list").replaceChildren();
+    $("file-preview").textContent = "";
+    $("file-title").textContent = "Choose a file";
+  }
+  function showFiles() {
+    const filter = $("files-filter").value.toLowerCase();
+    $("files-list").replaceChildren();
+    for (const file of fileRecords.filter(f => f.path.toLowerCase().includes(filter))) {
+      const button = node("button", file.path);
+      button.type = "button";
+      button.onclick = () => {
+        $("file-title").textContent = file.path;
+        $("file-preview").textContent = file.preview ? file.text : "Preview unavailable for this file. Use the workspace archive download.";
+      };
+      $("files-list").append(button);
+    }
+  }
+  async function loadFiles() {
+    const workspace = state.workspace, generation = ++filesGeneration;
+    fileRecords = [];
+    $("files-list").replaceChildren();
+    $("file-preview").textContent = "";
+    $("file-title").textContent = "Choose a file";
+    $("files-status").textContent = "Loading workspace files…";
+    $("files-refresh").disabled = true;
+    try {
+      const files = await api(`/${workspace}/files`);
+      if (generation !== filesGeneration || workspace !== state.workspace) return;
+      fileRecords = files;
+      showFiles();
+      $("files-status").textContent = files.length ? `${files.length} files loaded.` : "This workspace has no files yet.";
+    } catch (e) {
+      if (generation === filesGeneration) $("files-status").textContent = e.message;
+    } finally {
+      if (generation === filesGeneration) $("files-refresh").disabled = false;
+    }
+  }
+  $("browse-files").onclick = () => {
+    $("files-filter").value = "";
+    $("files-dialog").showModal();
+    return loadFiles();
+  };
+  $("files-refresh").onclick = loadFiles;
+  $("files-filter").oninput = showFiles;
+  $("files-close").onclick = closeFiles;
+  $("files-dialog").onclose = () => {
+    if ($("files-dialog").open) return;
+    filesGeneration++;
+    fileRecords = [];
+    $("files-list").replaceChildren();
+    $("file-preview").textContent = "";
+  };
+  $("project-upload-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const file = $("project-zip").files[0];
+    if (!file) return;
+    if (file.size > 16 * 1024 * 1024) { report(Error("ZIP upload exceeds 16 MB")); return; }
+    $("project-upload").disabled = true;
+    $("status").textContent = "Uploading and creating project workspace…";
+    try {
+      const response = await fetch(`/api/v1/board/projects?name=${encodeURIComponent($("project-name").value)}`, {
+        method: "POST", headers: {...headers(), "Content-Type": "application/zip"}, body: file,
+      });
+      const result = await response.json();
+      if (!response.ok) throw Error(result.error || "Project upload failed");
+      state.workspace = result.id;
+      state.task = null;
+      $("task-dialog").close();
+      $("project-upload-form").reset();
+      await init();
+      $("status").textContent = "Project uploaded. Browse its files or create a task for the builder.";
+    } catch (e) { report(e); }
+    finally { $("project-upload").disabled = false; }
   };
   $("download").onclick = async () => {
     try {
