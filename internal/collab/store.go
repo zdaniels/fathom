@@ -28,21 +28,23 @@ type Member struct {
 	Role   string `json:"role"`
 }
 type Task struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspaceId"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	State       string    `json:"state"`
-	Assignee    string    `json:"assignee"`
-	Builder     string    `json:"builder"`
-	Reviewer    string    `json:"reviewer"`
-	Handoff     string    `json:"handoff"`
-	Review      string    `json:"review"`
-	Source      string    `json:"source,omitempty"`
-	ExternalID  string    `json:"externalId,omitempty"`
-	ExternalURL string    `json:"externalUrl,omitempty"`
-	Revision    int       `json:"revision"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	BuildRevision  int       `json:"buildRevision,omitempty"`
+	ReviewRevision int       `json:"reviewRevision,omitempty"`
+	ID             string    `json:"id"`
+	WorkspaceID    string    `json:"workspaceId"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	State          string    `json:"state"`
+	Assignee       string    `json:"assignee"`
+	Builder        string    `json:"builder"`
+	Reviewer       string    `json:"reviewer"`
+	Handoff        string    `json:"handoff"`
+	Review         string    `json:"review"`
+	Source         string    `json:"source,omitempty"`
+	ExternalID     string    `json:"externalId,omitempty"`
+	ExternalURL    string    `json:"externalUrl,omitempty"`
+	Revision       int       `json:"revision"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 type Activity struct {
 	ID     int64     `json:"id"`
@@ -74,6 +76,7 @@ func Open(path string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,state TEXT NOT NULL,revision INTEGER NOT NULL,record BLOB NOT NULL);
  CREATE UNIQUE INDEX IF NOT EXISTS one_workspace_run ON tasks(workspace_id) WHERE state='running';
  CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,task_id TEXT NOT NULL,record BLOB NOT NULL);
+ CREATE TABLE IF NOT EXISTS run_evidence(workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,role TEXT NOT NULL,record BLOB NOT NULL,PRIMARY KEY(workspace_id,task_id,role));
  CREATE INDEX IF NOT EXISTS workspace_activity ON activity(workspace_id,id);`)
 	if err != nil {
 		db.Close()
