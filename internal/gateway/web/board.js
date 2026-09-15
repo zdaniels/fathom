@@ -121,21 +121,112 @@
       : data.workspaces[0]?.id || "";
     $("workspace").value = state.workspace;
     state.data = null;
+    startLive();
     await refresh();
   }
-  async function refresh() {
+  let refreshing = null,
+    refreshAgain = false;
+  function refresh() {
+    refreshAgain = true;
+    if (refreshing) return refreshing;
+    refreshing = (async () => {
+      while (refreshAgain) {
+        refreshAgain = false;
+        if (!state.workspace) {
+          $("workspace-content").hidden = true;
+          continue;
+        }
+        const id = state.workspace;
+        const data = await api("/" + id);
+        if (id !== state.workspace) continue;
+        if (state.data && JSON.stringify(state.data) === JSON.stringify(data))
+          continue;
+        state.data = data;
+        $("workspace-content").hidden = false;
+        render();
+      }
+    })().finally(() => {
+      refreshing = null;
+    });
+    return refreshing;
+  }
+  let liveController = null,
+    liveTimer = null,
+    liveConnected = false;
+  function stopLive() {
+    clearTimeout(liveTimer);
+    liveTimer = null;
+    liveController?.abort();
+    liveController = null;
+    liveConnected = false;
+  }
+  function startLive() {
+    stopLive();
     if (!state.workspace) {
-      $("workspace-content").hidden = true;
+      $("live-status").textContent = "";
       return;
     }
-    const id = state.workspace;
-    const data = await api("/" + id);
-    if (id !== state.workspace) return;
-    if (state.data && JSON.stringify(state.data) === JSON.stringify(data))
-      return;
-    state.data = data;
-    $("workspace-content").hidden = false;
-    render();
+    const id = state.workspace,
+      controller = new AbortController();
+    liveController = controller;
+    const current = () =>
+      liveController === controller && state.workspace === id;
+    $("live-status").textContent = "Connecting live updates…";
+    (async () => {
+      let retry = true;
+      try {
+        const response = await fetch(`/api/v1/board/${id}/events`, {
+          headers: headers(),
+          signal: controller.signal,
+        });
+        if (!current()) return;
+        if ([401, 403, 404].includes(response.status)) {
+          retry = false;
+          state.task = null;
+          state.data = null;
+          state.workspace = "";
+          $("task-dialog").close();
+          $("workspace-content").hidden = true;
+          $("live-status").textContent =
+            "Access ended. Sign in again or choose another workspace.";
+          return;
+        }
+        if (!response.ok || !response.body)
+          throw Error("Live connection unavailable");
+        liveConnected = true;
+        $("live-status").textContent = "Live updates connected";
+        const reader = response.body.getReader(),
+          decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          while (current()) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary;
+            while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+              const event = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              if (event.split("\n").includes("event: changed"))
+                refresh().catch(report);
+            }
+            if (buffer.length > 4096) throw Error("Invalid live update");
+          }
+        } finally {
+          await reader.cancel().catch(() => {});
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+      } finally {
+        if (current()) {
+          liveConnected = false;
+          if (retry && !controller.signal.aborted) {
+            $("live-status").textContent = "Reconnecting live updates…";
+            liveTimer = setTimeout(startLive, 2000);
+          }
+        }
+      }
+    })();
   }
   function render() {
     const data = state.data,
@@ -183,10 +274,15 @@
       : "No connection configured. The built-in board is ready to use. Your instance administrator can connect this workspace to a Linear team or Jira project.";
     renderActivity($("activity"), data.activity);
     if (state.task) {
+      renderActivity(
+        $("task-activity"),
+        data.activity.filter((e) => e.taskId === state.task.id),
+      );
+      updateTaskControls();
       const latest = data.tasks.find((t) => t.id === state.task.id);
       if (latest && latest.revision !== state.task.revision && !state.busy) {
         if (state.task.state === "running") {
-          openTask(latest);
+          openTask(latest, true);
           return;
         }
         $("task-status").textContent =
@@ -357,7 +453,8 @@
         );
     }
   }
-  function openTask(t) {
+  function openTask(t, preserveComment = false) {
+    const draft = preserveComment ? $("task-comment").value : "";
     state.task = t;
     loadEvidence(t);
     $("task-status").textContent = "";
@@ -378,7 +475,7 @@
     markdown($("handoff"), t.handoff || "No builder handoff yet.");
     markdown($("review"), t.review || "No review yet.");
     $("publish-preview").hidden = true;
-    $("task-comment").value = "";
+    if ($("task-comment").value !== draft) $("task-comment").value = draft;
     const link = $("external-link");
     link.hidden = true;
     try {
@@ -393,40 +490,58 @@
       $("task-activity"),
       state.data.activity.filter((e) => e.taskId === t.id),
     );
+    updateTaskControls();
+    if (!$("task-dialog").open) $("task-dialog").showModal();
+  }
+  function updateTaskControls() {
+    const t = state.task;
+    if (!t || !state.data) return;
     const readOnly = state.data.role === "viewer";
     for (const el of $("task-dialog").querySelectorAll(
       "input,textarea,select,button[data-action]",
     ))
-      el.disabled = readOnly || t.state === "running";
+      el.disabled = readOnly || t.state === "running" || state.busy;
+    // Discussion stays editable while an agent is running or a comment is
+    // sending. Only clear the text that the successful request actually sent.
+    $("task-comment").disabled = readOnly;
+    $("task-dialog").querySelector('[data-action="comment"]').disabled =
+      readOnly || state.busy;
     $("edit-form").querySelector("button").disabled =
-      readOnly || t.state === "running";
-    for (const el of $("task-dialog").querySelectorAll(
-      '[data-action="cancel"]',
-    ))
-      el.disabled = readOnly || t.state !== "running";
+      readOnly || t.state === "running" || state.busy;
+    $("task-dialog").querySelector('[data-action="cancel"]').disabled =
+      readOnly || t.state !== "running" || state.busy;
     $("task-dialog").querySelector('[data-action="approve"]').disabled =
-      readOnly || t.state !== "review" || !t.review;
-    if (!$("task-dialog").open) $("task-dialog").showModal();
+      readOnly || t.state !== "review" || !t.review || state.busy;
   }
   async function action(name, extra = {}) {
     if (state.busy || !state.task) return;
     state.busy = true;
+    updateTaskControls();
+    const workspace = state.workspace,
+      task = state.task.id,
+      text = $("task-comment").value;
+    const current = () =>
+      state.workspace === workspace && state.task?.id === task;
     try {
-      const t = await api(
-        `/${state.workspace}/tasks/${state.task.id}/${name}`,
-        {
-          revision: state.task.revision,
-          text: $("task-comment").value,
-          ...extra,
-        },
-      );
+      const t = await api(`/${workspace}/tasks/${task}/${name}`, {
+        revision: state.task.revision,
+        text,
+        ...extra,
+      });
+      if (!current()) return;
+      if (name === "comment" && $("task-comment").value === text)
+        $("task-comment").value = "";
       await refresh();
-      if (t.id) openTask(t);
+      if (!current()) return;
+      if (t.id) openTask(t, true);
       else $("task-status").textContent = t.status || "Saved.";
     } catch (e) {
-      report(e);
+      if (current()) report(e);
     } finally {
       state.busy = false;
+      // A live completion may have arrived while this POST was in flight.
+      if (state.data) render();
+      updateTaskControls();
     }
   }
   $("workspace-form").onsubmit = async (e) => {
@@ -445,6 +560,7 @@
     $("task-dialog").close();
     state.workspace = $("workspace").value;
     state.data = null;
+    startLive();
     refresh().catch(report);
   };
   $("task-form").onsubmit = async (e) => {
@@ -540,6 +656,16 @@
   }
   init().catch(report);
   setInterval(() => {
-    if (!document.hidden && !state.busy) refresh().catch(report);
-  }, 4000);
+    if (!document.hidden && !liveConnected) refresh().catch(report);
+  }, 30000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      refresh().catch(report);
+      if (!liveConnected) startLive();
+    }
+  });
+  window.addEventListener("pagehide", stopLive);
+  window.addEventListener("pageshow", () => {
+    if (!liveController) startLive();
+  });
 })();
