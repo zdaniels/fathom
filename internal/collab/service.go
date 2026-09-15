@@ -149,6 +149,26 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(buffer.Bytes())
 		return
 	}
+	if r.Method == "GET" && len(parts) == 4 && parts[1] == "tasks" && parts[3] == "evidence" {
+		t, err := s.Store.Task(workspace, parts[2])
+		if err != nil {
+			fail(w, 404, errors.New("task not found"))
+			return
+		}
+		records, err := s.Store.Evidence(workspace, t.ID)
+		if err != nil {
+			fail(w, 500, err)
+			return
+		}
+		current := []Evidence{}
+		for _, e := range records {
+			if (e.Role == "builder" && e.Revision == t.BuildRevision) || (e.Role == "reviewer" && e.Revision == t.ReviewRevision) {
+				current = append(current, e)
+			}
+		}
+		respond(w, 200, current)
+		return
+	}
 	if r.Method != "POST" {
 		fail(w, 405, errors.New("POST required"))
 		return
@@ -294,6 +314,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.Assignee = in.Assignee
 		t.Builder = in.Builder
 		t.Reviewer = in.Reviewer
+		t.BuildRevision = 0
+		t.ReviewRevision = 0
 		t.Handoff = ""
 		t.Review = ""
 		t.State = "backlog"
@@ -336,9 +358,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, err)
 			return
 		}
+		previousReview := t.Review
 		t.State = "running"
+		t.Review = ""
 		if action == "build" {
-			t.Review = ""
+			t.BuildRevision = t.Revision + 1
+			t.ReviewRevision = 0
+		} else {
+			t.ReviewRevision = t.Revision + 1
 		}
 		t, err = s.Store.Save(t, user, action+"_started", in.Text)
 		if err != nil {
@@ -351,7 +378,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.runs[t.ID] = cancel
 		s.wg.Add(1)
-		go s.run(ctx, cancel, t, action == "review", user)
+		go s.run(ctx, cancel, t, action == "review", user, previousReview)
 		respond(w, 202, t)
 		return
 	case "publish":
@@ -389,10 +416,12 @@ func (s *Service) connector(workspace, provider string) *Connector {
 	}
 	return nil
 }
-func (s *Service) run(ctx context.Context, cancel context.CancelFunc, t Task, review bool, user string) {
+func (s *Service) run(ctx context.Context, cancel context.CancelFunc, t Task, review bool, user, previousReview string) {
 	defer s.wg.Done()
 	defer cancel()
-	result, err := s.Runner.Run(ctx, t, review, func() bool {
+	promptTask := t
+	promptTask.Review = previousReview
+	result, err := s.Runner.RunWithEvidence(ctx, promptTask, review, func() bool {
 		role := s.Store.Role(t.WorkspaceID, user)
 		return role == "member" || role == "admin"
 	})
@@ -400,17 +429,23 @@ func (s *Service) run(ctx context.Context, cancel context.CancelFunc, t Task, re
 	defer s.mu.Unlock()
 	delete(s.runs, t.ID)
 	kind := "handoff"
-	text := result
+	text := result.Handoff
+	if saveErr := s.Store.SaveEvidence(t.WorkspaceID, t.ID, result.Evidence); saveErr != nil {
+		err = errors.New("could not persist run evidence; inspect workspace before retrying")
+	}
 	t.State = "review"
 	if err != nil {
+		if !review {
+			t.Handoff = ""
+		}
 		t.State = "blocked"
 		kind = "run_failed"
 		text = err.Error()
 	} else if review {
 		kind = "reviewed"
-		t.Review = result
+		t.Review = result.Handoff
 	} else {
-		t.Handoff = result
+		t.Handoff = result.Handoff
 	}
 	if _, err := s.Store.Save(t, "agent:"+user, kind, text); err != nil {
 		slog.Error("failed to persist task outcome", "task", t.ID, "err", err)

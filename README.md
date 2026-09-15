@@ -27,7 +27,7 @@ trusted host workspace. Legacy tenant catalog records do not provision environme
 | --- | --- |
 | Terminal chat | Interactive chat, model selection, thread joining, and configuration wizard. |
 | Browser UI | Chat at `/`, settings at `/settings`, shared agent board at `/board`, and user administration at `/admin` in team/enterprise mode. |
-| Collaboration | Built-in tasks, member roles, builder/reviewer handoffs, human approval, activity history, and optional Linear/Jira issue import and handoff comments. [Setup](docs/collaboration.md). |
+| Collaboration | Built-in tasks, member roles, builder/reviewer handoffs, file diffs and recorded test results, human approval, activity history, and optional Linear/Jira issue import and handoff comments. [Setup](docs/collaboration.md). |
 | Live responses | Actual text deltas from Claude Code, OpenAI-compatible APIs, Anthropic, and Ollama. Other backends return one completed response. SSE reconnects reconcile persisted messages. |
 | Tools | File reads/writes/edits, grep/glob, shell, web search, notes, Docker-based Python, image generation, and macOS system actions. Availability depends on policy and dependencies. |
 | Skills | Bundled integrations installed with `fathom install`; Node and Python subprocess runners. |

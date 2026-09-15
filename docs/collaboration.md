@@ -10,7 +10,8 @@ have their own charges.
 2. Create a workspace, then a task with an outcome and acceptance criteria.
 3. Assign a human owner and optional named builder/reviewer models.
 4. Mark it ready and click **Start builder**. Starting work is always explicit.
-5. Inspect the builder's handoff: changes, verification, decisions, open questions.
+5. Open **Changes and test results** to inspect file diffs and recorded commands,
+   then read the builder's handoff: summary, decisions, and open questions.
 6. Click **Run reviewer**. The reviewer sees the same files through a read-only mount.
 7. Request changes or approve completion. An agent cannot approve for a person.
 
@@ -20,6 +21,35 @@ handoff and review. Concurrent updates use revisions: a stale edit returns HTTP
 409 instead of overwriting a teammate's changes. Only one run can write a workspace
 at a time. The board refreshes every four seconds and records persistent activity.
 Private chat history remains private; adding workspace members does not share it.
+
+## Review changes and test results
+
+Open a task to see **Changes and test results**. Each builder run compares files
+before and after execution. Expand a file to see additions and removals; permission
+changes are shown too. Binary files and symlinks are listed without text previews.
+The coordinator captures files without extracting archives or following links.
+
+The builder and reviewer have a `test` tool for verification commands. The panel
+records actual commands, output, exit status and duration for both `test` and
+`shell` calls. Exit 0 means a command succeeded, not that the task is correct.
+No recorded tests is shown explicitly; a written claim of passing tests is not
+converted into a passing result. Failed/cancelled runs retain completed command
+records and attempt a final file comparison before container cleanup.
+
+Evidence belongs to the latest builder/reviewer runs for that task, not the live
+workspace. Other tasks can subsequently change shared files. Editing a task clears
+its displayed evidence; starting a new builder invalidates prior review evidence.
+Older tasks have no evidence until rerun. Gateway crashes may interrupt capture;
+the task is marked blocked and must be inspected before retrying. Human approval
+still requires a reviewer handoff; evidence adds visibility, not an automatic test gate.
+
+Capture is bounded: 200 non-directory entries and a 16 MB tar stream per snapshot,
+32 KB per text file and 1 MB total text per snapshot. If a snapshot cannot be
+captured, the panel reports comparison unavailable rather than claiming no changes.
+Command previews retain 2 KB of script and 4 KB of output per call, with explicit
+truncation notices. Latest evidence is persisted separately in collaboration.db and
+loaded only when a task is opened. Only workspace members can read it; evidence
+is not included in published Linear/Jira comments.
 
 ## Add people
 
@@ -159,6 +189,7 @@ All board endpoints use the same Fathom bearer token as chat.
 | POST | `/{workspace}/tasks` | Title, description, assignee, builder, reviewer |
 | POST | `/{workspace}/import` | `{ "provider": "linear", "id": "TEAM-123" }` |
 | POST | `/{workspace}/tasks/{task}/{action}` | Current `revision`, optional `text`; edit also takes task fields |
+| GET | `/{workspace}/tasks/{task}/evidence` | Latest applicable builder/reviewer file changes and command records |
 | GET | `/{workspace}/archive` | Workspace `.tar.gz` |
 
 Actions: `edit`, `ready`, `comment`, `changes`, `build`, `review`, `cancel`,
