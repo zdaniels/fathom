@@ -12,3 +12,4 @@ spec:
       protocol: TCP
   selector:
     app: fathom
+    app.kubernetes.io/instance: {{ .Release.Name }}

@@ -41,6 +41,7 @@ const (
 )
 
 type storedToken struct {
+	ExpiresAt  time.Time
 	UserID     string
 	Label      string
 	Kind       TokenKind
@@ -83,6 +84,28 @@ func NewWithStore(store *DeviceStore) (*Manager, error) {
 // token — caller must show it once and discard.
 func (m *Manager) CreateAPIToken(userID, label string) (string, error) {
 	return m.createToken(userID, label, KindAPI, "", "")
+}
+
+// CreateSessionToken creates an ephemeral, expiring SSO session. It is never
+// persisted or exchangeable for an unbounded paired-device credential.
+func (m *Manager) CreateSessionToken(user string, ttl time.Duration) (string, error) {
+	if ttl <= 0 || ttl > time.Hour {
+		return "", errors.New("invalid session lifetime")
+	}
+	token, err := security.GenerateToken()
+	if err != nil {
+		return "", err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for k, v := range m.tokens {
+		if !v.ExpiresAt.IsZero() && now.After(v.ExpiresAt) {
+			delete(m.tokens, k)
+		}
+	}
+	m.tokens[security.SHA256Hex(token)] = storedToken{UserID: user, Kind: "sso", CreatedAt: now, LastSeen: now, ExpiresAt: now.Add(ttl)}
+	return token, nil
 }
 
 // CreateDeviceToken mints a token bound to a paired device. deviceID is
@@ -143,7 +166,7 @@ func (m *Manager) Authenticate(token string) (Result, error) {
 	now := time.Now().UTC()
 	m.mu.Lock()
 	stored, ok := m.tokens[hash]
-	if !ok {
+	if !ok || (!stored.ExpiresAt.IsZero() && now.After(stored.ExpiresAt)) {
 		m.mu.Unlock()
 		return Result{}, errors.New("invalid token")
 	}
@@ -154,6 +177,9 @@ func (m *Manager) Authenticate(token string) (Result, error) {
 		m.store.TouchLastSeen(hash, now)
 	}
 	method := "token"
+	if stored.Kind == "sso" {
+		method = "sso"
+	}
 	if stored.Kind == KindDevice {
 		method = "device"
 	}

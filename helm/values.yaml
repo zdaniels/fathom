@@ -1,14 +1,31 @@
+# One process and one persistent volume per instance. Use separate releases,
+# credentials, volumes, and container boundaries for unrelated tenants.
 replicaCount: 1
-
 image:
-  repository: ghcr.io/zdaniels/fathom
-  tag: "latest"
+  repository: "" # Required: build/push your image, or use a published Fathom image.
+  tag: "" # Required: an immutable tag is recommended.
   pullPolicy: IfNotPresent
-
 service:
   type: ClusterIP
   port: 8790
-
+mode: personal
+config:
+  llm:
+    provider: ollama
+    model: llama3.2
+    baseUrl: http://ollama:11434
+policy:
+  version: 1
+  defaults:
+    network: deny
+    filesystem: read-only
+    shell: deny
+    secrets: isolated
+  rules: []
+# Optional Secret containing a complete config.yaml, for OIDC client secrets.
+configSecret: ""
+# Optional Secret containing provider credential environment variables.
+credentialsSecret: ""
 resources:
   limits:
     cpu: "1"
@@ -16,32 +33,15 @@ resources:
   requests:
     cpu: 250m
     memory: 256Mi
-
-# Deployment mode. Drives which features mount at startup:
-#   personal   — single user, no admin API, no SSO. Default.
-#   team       — multitenancy + admin API + RBAC.
-#   enterprise — team + SSO/OIDC + compliance exports (configure
-#                FANTAZM_OIDC_* env or a mounted fathom.config.yaml).
-mode: personal
-
-auth:
-  mode: token
-
-encryption:
-  kms: none
-
-audit:
-  siem: none
-
 persistence:
   enabled: true
   size: 1Gi
   storageClass: ""
-
 securityContext:
   runAsNonRoot: true
-  runAsUser: 65534
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
   readOnlyRootFilesystem: true
   capabilities:
-    drop:
-      - ALL
+    drop: [ALL]

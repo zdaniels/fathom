@@ -3,12 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/zdaniels/fathom/internal/agentfactory"
 	"github.com/zdaniels/fathom/internal/cli/ui"
 	"github.com/zdaniels/fathom/internal/config"
+	"github.com/zdaniels/fathom/internal/security"
 )
 
 func init() {
@@ -19,10 +18,7 @@ func init() {
 // modes: `fathom audit` for human-readable tail, `fathom audit --json`
 // for piping into jq.
 //
-// The audit log lives in-memory inside the gateway process, so running
-// this command spins up a transient factory just to access the logger.
-// That's intentional — there's no separate "audit daemon" to coordinate
-// with.
+// Reads durable state directly without constructing an agent or sidecars.
 func newAuditCommand() *cobra.Command {
 	var asJSON bool
 	var limit int
@@ -36,16 +32,21 @@ the agent is recorded here.
 Pipe through jq for filtering: fathom audit --json | jq '.[] | select(.action=="tool_call")'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := config.LoadConfig("")
-			result, err := agentfactory.CreateDefault(cfg, agentfactory.Options{})
+			if limit < 0 {
+				return fmt.Errorf("limit must not be negative")
+			}
+			audit, err := security.OpenAuditLogger(security.AuditPath(cfg.DataDir))
 			if err != nil {
 				return err
 			}
-			defer func() {
-				if result.Memory != nil {
-					result.Memory.Stop()
-				}
-			}()
-			entries := result.Security.Audit.Snapshot()
+			defer audit.Close()
+			entries := audit.Snapshot()
+			if err := audit.Err(); err != nil {
+				return err
+			}
+			if asJSON && len(entries) == 0 {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(entries)
+			}
 			if len(entries) == 0 {
 				out := cmd.OutOrStdout()
 				fmt.Fprintln(out)
@@ -58,7 +59,7 @@ Pipe through jq for filtering: fathom audit --json | jq '.[] | select(.action=="
 				entries = entries[len(entries)-limit:]
 			}
 			if asJSON {
-				return json.NewEncoder(os.Stdout).Encode(entries)
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(entries)
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out)

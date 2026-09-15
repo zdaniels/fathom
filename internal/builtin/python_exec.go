@@ -92,6 +92,9 @@ For unsandboxed shell access use bash instead — but bash is policy-gated.`,
 
 			cctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
+			if err := exec.CommandContext(cctx, "docker", "info", "--format", "{{.ServerVersion}}").Run(); err != nil {
+				return nil, fmt.Errorf("python_exec: Docker daemon unavailable: %w", err)
+			}
 			cmd := exec.CommandContext(cctx, "docker", "run",
 				"--rm",
 				"--network=none",
@@ -109,8 +112,14 @@ For unsandboxed shell access use bash instead — but bash is policy-gated.`,
 			cmd.Stderr = &stderr
 			err = cmd.Run()
 			exitCode := 0
+			if cctx.Err() != nil {
+				return nil, fmt.Errorf("python_exec: %w", cctx.Err())
+			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
+				if exitCode == 125 || exitCode == 126 || exitCode == 127 {
+					return nil, fmt.Errorf("python_exec: Docker runtime failed (exit %d): %s", exitCode, trunc(stderr.String(), 4096))
+				}
 			} else if cctx.Err() == context.DeadlineExceeded {
 				return nil, fmt.Errorf("python_exec: timed out after %s", timeout)
 			} else if err != nil {

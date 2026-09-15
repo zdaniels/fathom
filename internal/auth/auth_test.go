@@ -89,3 +89,23 @@ func TestSessionCleanupRemovesExpired(t *testing.T) {
 		t.Errorf("Count after Cleanup = %d, want 0", s.Count())
 	}
 }
+
+func TestSSOSessionExpires(t *testing.T) {
+	m := New()
+	token, err := m.CreateSessionToken("alice", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := m.Authenticate(token); err != nil || result.Method != "sso" {
+		t.Fatalf("session: %+v %v", result, err)
+	}
+	m.mu.Lock()
+	for hash, stored := range m.tokens {
+		stored.ExpiresAt = time.Now().Add(-time.Second)
+		m.tokens[hash] = stored
+	}
+	m.mu.Unlock()
+	if _, err := m.Authenticate(token); err == nil {
+		t.Fatal("expired session accepted")
+	}
+}

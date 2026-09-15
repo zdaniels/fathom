@@ -343,6 +343,13 @@ func buildSharedRuntime(cfg types.Config, opts Options) (*sharedRuntime, error) 
 
 	policy := config.LoadPolicy(config.ResolvePolicyPath(cfg))
 	mesh := security.NewMesh(policy, security.MeshOptions{Secrets: vault})
+	if opts.VaultOverride == nil {
+		audit, err := security.OpenAuditLogger(security.AuditPath(cfg.DataDir))
+		if err != nil {
+			return nil, err
+		}
+		mesh.Audit = audit
+	}
 	getSecret := secretGetter(vault)
 
 	// LLM router (multi-model registry) — every per-profile Loop reuses this.

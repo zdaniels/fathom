@@ -152,6 +152,7 @@ type ProfileConfig struct {
 
 // Config is the top-level configuration loaded from fathom.config.yaml.
 type Config struct {
+	ConfigPath   string              `json:"-" yaml:"-"` // Absolute source path, retained for settings and policy resolution.
 	Mode         Mode                `yaml:"mode"`
 	Profile      Profile             `yaml:"profile,omitempty"` // "" = default, "minimal" = lean
 	Host         string              `yaml:"host"`
@@ -330,13 +331,14 @@ type AdminConfig struct {
 	// 0 → the built-in default (60). Negative → disabled.
 	RateLimitPerMin int `yaml:"rateLimitPerMin,omitempty"`
 	// RequireStepUp gates destructive mutations (role changes, tenant
-	// create) behind a fresh re-auth: the caller must resupply a valid
-	// admin token in the X-Step-Up-Token header (sudo-style), proving live
-	// possession of admin credentials rather than a replayed session.
+	// create and settings edits) behind a fresh OIDC login. Supply the
+	// single-use, five-minute stepUpToken as X-Step-Up-Token with the same
+	// user's bearer token. Requires SSO; ordinary API tokens cannot substitute.
 	RequireStepUp bool `yaml:"requireStepUp,omitempty"`
 }
 
 type SSOConfig struct {
+	RedirectURI  string `yaml:"redirectUri"`
 	Issuer       string `yaml:"issuer"`
 	ClientID     string `yaml:"clientId"`
 	ClientSecret string `yaml:"clientSecret"`

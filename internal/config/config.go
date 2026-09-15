@@ -66,7 +66,11 @@ func LoadConfig(path string) types.Config {
 		slog.Error("failed to read config file; using defaults", "path", path, "err", err)
 	}
 
+	cfg.ConfigPath, _ = filepath.Abs(path)
 	applyEnvOverrides(&cfg)
+	if cfg.DataDir != "" && !filepath.IsAbs(cfg.DataDir) {
+		cfg.DataDir = filepath.Join(filepath.Dir(cfg.ConfigPath), cfg.DataDir)
+	}
 	validate(&cfg)
 	return cfg
 }
@@ -74,12 +78,15 @@ func LoadConfig(path string) types.Config {
 // DiscoverConfig implements the discovery order documented on LoadConfig.
 // Returns "" if nothing is found. Exported so the chat command can show
 // the user which config is active and the doctor command can diagnose.
-func DiscoverConfig() string {
+func DiscoverConfig() string { return DiscoverConfigFrom(cwd()) }
+
+// DiscoverConfigFrom searches without changing the process working directory.
+func DiscoverConfigFrom(dir string) string {
 	if v := brandenv.Get("FATHOM_CONFIG"); v != "" {
 		return v
 	}
 	// Upward search from cwd.
-	d := cwd()
+	d := dir
 	for {
 		for _, name := range []string{"fathom.config.yaml", "fantazm.config.yaml"} {
 			candidate := filepath.Join(d, name)
@@ -127,17 +134,20 @@ func GlobalConfigPath() string {
 //     a subdir of the project)
 //  3. Whatever DiscoverPolicy finds via upward search + global fallback
 func ResolvePolicyPath(cfg types.Config) string {
+	if path := brandenv.Get("FATHOM_POLICY"); path != "" {
+		return path
+	}
 	if cfg.PolicyFile != "" {
 		if filepath.IsAbs(cfg.PolicyFile) {
 			return cfg.PolicyFile
 		}
-		// Resolve relative to the config file's directory if we can find it.
-		if cfgPath := DiscoverConfig(); cfgPath != "" {
-			candidate := filepath.Join(filepath.Dir(cfgPath), cfg.PolicyFile)
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
+		if cfg.ConfigPath != "" {
+			return filepath.Join(filepath.Dir(cfg.ConfigPath), cfg.PolicyFile)
 		}
+		if cfgPath := DiscoverConfig(); cfgPath != "" {
+			return filepath.Join(filepath.Dir(cfgPath), cfg.PolicyFile)
+		}
+		return cfg.PolicyFile
 	}
 	return DiscoverPolicy()
 }

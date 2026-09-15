@@ -13,6 +13,7 @@ import (
 	"github.com/zdaniels/fathom/internal/agent/llm"
 	"github.com/zdaniels/fathom/internal/agentfactory"
 	"github.com/zdaniels/fathom/internal/auth"
+	"github.com/zdaniels/fathom/internal/brandenv"
 	"github.com/zdaniels/fathom/internal/cli/ui"
 	"github.com/zdaniels/fathom/internal/config"
 	"github.com/zdaniels/fathom/internal/enterprise"
@@ -99,53 +100,35 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 			if err != nil {
 				return err
 			}
-			if cfg.Takeover != nil && cfg.Takeover.Enabled {
-				// Takeover: every message goes straight to the configured
-				// external coding agent (Claude Code / Codex); the local routed
-				// agent is bypassed. Only the basic Handler is wired so the
-				// gateway uses it; HandlerN/NU stay unset.
-				th, terr := agentfactory.BuildTakeoverHandler(cfg)
-				if terr != nil {
-					return fmt.Errorf("takeover mode: %w", terr)
-				}
-				gw.SetMessageHandler(gateway.MessageHandler(th))
-				provider := "claude"
-				if cfg.Takeover.Provider != "" {
-					provider = cfg.Takeover.Provider
-				}
-				// Reflect takeover in the startup banner's `agent` line instead
-				// of the routed-agent description, which is bypassed in this
-				// mode — otherwise the splash misleadingly advertises local
-				// models that never see a message.
-				result.Description = "takeover → " + agentfactory.TakeoverDesc(cfg.Takeover)
-				slog.Info("Takeover mode ON — all messages route to the external coding agent", "provider", provider)
-			} else {
-				gw.SetMessageHandler(result.Handler)
-				// HandlerN + router enable per-thread `/model` overrides
-				// in the threads API. Both are no-ops when the agent
-				// factory didn't wire them (single-model legacy setup).
-				if result.HandlerN != nil {
-					gw.SetMessageHandlerN(gateway.MessageHandlerN(result.HandlerN))
-				}
-				// HandlerNU is preferred when available — it lets the
-				// gateway persist token usage onto each agent message so
-				// the threads API can surface cost info to clients.
-				if result.HandlerNU != nil {
-					gw.SetMessageHandlerNU(func(ctx context.Context, msg types.ChannelMessage, sess types.Session, model string) (string, *gateway.UsageSnapshot, string, error) {
-						reply, u, resolved, herr := result.HandlerNU(ctx, msg, sess, model)
-						if herr != nil {
-							return "", nil, "", herr
+			if result.Security != nil {
+				defer result.Security.Audit.Close()
+			}
+
+			gw.SetMessageHandler(result.Handler)
+			// HandlerN + router enable per-thread `/model` overrides
+			// in the threads API. Both are no-ops when the agent
+			// factory didn't wire them (single-model legacy setup).
+			if result.HandlerN != nil {
+				gw.SetMessageHandlerN(gateway.MessageHandlerN(result.HandlerN))
+			}
+			// HandlerNU is preferred when available — it lets the
+			// gateway persist token usage onto each agent message so
+			// the threads API can surface cost info to clients.
+			if result.HandlerNU != nil {
+				gw.SetMessageHandlerNU(func(ctx context.Context, msg types.ChannelMessage, sess types.Session, model string) (string, *gateway.UsageSnapshot, string, error) {
+					reply, u, resolved, herr := result.HandlerNU(ctx, msg, sess, model)
+					if herr != nil {
+						return "", nil, "", herr
+					}
+					var snap *gateway.UsageSnapshot
+					if u != nil {
+						snap = &gateway.UsageSnapshot{
+							PromptTokens:     u.PromptTokens,
+							CompletionTokens: u.CompletionTokens,
 						}
-						var snap *gateway.UsageSnapshot
-						if u != nil {
-							snap = &gateway.UsageSnapshot{
-								PromptTokens:     u.PromptTokens,
-								CompletionTokens: u.CompletionTokens,
-							}
-						}
-						return reply, snap, resolved, nil
-					})
-				}
+					}
+					return reply, snap, resolved, nil
+				})
 			}
 			if result.Router != nil {
 				gw.SetModelRegistry(routerAdapter{r: result.Router})
@@ -167,7 +150,7 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 			if result.Security != nil && result.Security.Policy != nil {
 				gw.SetPolicyController(result.Security.Policy)
 			}
-			gw.SetSettingsPaths(config.DiscoverConfig(), config.ResolvePolicyPath(cfg))
+			gw.SetSettingsPaths(cfg.ConfigPath, config.ResolvePolicyPath(cfg))
 
 			// Mount enterprise features in team/enterprise mode. Pass the
 			// agent's own mesh so the AdminAPI's audit endpoint queries the
@@ -177,6 +160,11 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 			if err != nil {
 				return err
 			}
+
+			if ent != nil {
+				defer ent.DB.Close()
+			}
+			gw.SetReady(result.Ready)
 
 			// Scheduler — only fires when there's a real LLM behind the agent
 			// AND the profile isn't minimal (NanoClaw-style chat-brain mode
@@ -209,6 +197,12 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 						sess := makeLocalSession()
 						sess.ID = "scheduler-session"
 						sess.UserID = "scheduler"
+						if ent != nil {
+							sess.UserID = brandenv.Get("FATHOM_BOOTSTRAP_ADMIN")
+							if sess.UserID == "" {
+								sess.UserID = "admin"
+							}
+						}
 						return result.Handler(ctx, msg, sess)
 					},
 					Deliverer: eventDeliverer,

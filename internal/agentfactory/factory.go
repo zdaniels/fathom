@@ -95,6 +95,9 @@ type Result struct {
 // CreateRouted (intent-classifier + per-profile loops with filtered tool
 // sets). Otherwise builds the legacy single-agent path.
 func CreateDefault(cfg types.Config, opts Options) (*Result, error) {
+	if takeoverEnabled(cfg) {
+		return createTakeover(cfg, opts)
+	}
 	if cfg.Routing != nil && len(cfg.Routing.Profiles) > 0 {
 		if r, err := CreateRouted(cfg, opts); err != nil {
 			return nil, err
@@ -104,64 +107,24 @@ func CreateDefault(cfg types.Config, opts Options) (*Result, error) {
 	}
 	loadDotEnv()
 
-	vault := opts.VaultOverride
-	if vault == nil {
-		key, err := security.LoadOrCreateMasterKey()
-		if err != nil {
-			return nil, fmt.Errorf("ensure keyfile: %w", err)
-		}
-		v, err := security.OpenVault(security.VaultOpenOptions{
-			Path: security.DefaultVaultPath(),
-			Key:  key,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("open vault: %w", err)
-		}
-		vault = v
-	}
-
-	// Build the security mesh first so it's available to the echo path too.
-	policyPath := config.ResolvePolicyPath(cfg)
-	policy := config.LoadPolicy(policyPath)
-	mesh := security.NewMesh(policy, security.MeshOptions{Secrets: vault})
-
-	provider := cfg.LLM.Provider
-	apiKeyEnv := ""
-	switch provider {
-	case "openai":
-		apiKeyEnv = "OPENAI_API_KEY"
-	case "anthropic":
-		apiKeyEnv = "ANTHROPIC_API_KEY"
-	case "ollama":
-		// no key required
-	default:
-		apiKeyEnv = "OPENAI_API_KEY"
-	}
-	hasKey := apiKeyEnv == "" || vault.Has(apiKeyEnv) || os.Getenv(apiKeyEnv) != ""
-
-	getSecret := secretGetter(vault)
-
-	if !hasKey {
-		desc := "echo (no " + apiKeyEnv + " in vault or .env — run 'fathom init')"
-		return &Result{
-			Ready:       false,
-			Description: desc,
-			Vault:       vault,
-			Security:    mesh,
-			Handler: func(ctx context.Context, msg types.ChannelMessage, _ types.Session) (string, error) {
-				return "[fathom] Echo: \"" + msg.Text + "\"\n\n(Agent runtime is not wired to an LLM. Set " +
-					apiKeyEnv + " via 'fathom vault set " + apiKeyEnv + " <key>' or in .env.)", nil
-			},
-		}, nil
-	}
-
-	// Build the LLM router (multi-model registry). Falls back to single-model
-	// when cfg.LLM.Models is empty.
-	router, err := llm.NewRouter(cfg.LLM, func(name string) (string, error) {
-		return getSecret(name, "")
-	})
+	vault, mesh, err := openSecurity(cfg, opts)
 	if err != nil {
 		return nil, err
+	}
+	getSecret := secretGetter(vault)
+	router, err := llm.NewRouter(cfg.LLM, func(name string) (string, error) { return getSecret(name, "") })
+	if err != nil {
+		var missing *llm.MissingCredentialError
+		if !errors.As(err, &missing) {
+			return nil, err
+		}
+		return &Result{
+			Ready: false, Description: "echo (" + err.Error() + "; run 'fathom init')",
+			Vault: vault, Security: mesh,
+			Handler: func(ctx context.Context, msg types.ChannelMessage, _ types.Session) (string, error) {
+				return "[fathom] Echo: " + msg.Text + "\n\nAgent setup incomplete: " + missing.Error(), nil
+			},
+		}, nil
 	}
 
 	// Tool registry.
@@ -315,7 +278,10 @@ func CreateDefault(cfg types.Config, opts Options) (*Result, error) {
 	if len(names) > 1 {
 		desc = "router(" + strings.Join(names, ",") + "; default=" + defName + ")"
 	} else {
-		desc = provider + ":" + cfg.LLM.Model
+		desc = cfg.LLM.Provider + ":" + cfg.LLM.Model
+		if m, ok := cfg.LLM.Models[defName]; ok {
+			desc = m.Provider + ":" + m.Model
+		}
 	}
 	desc += " (" + asInt(len(tools.Names())) + " tools"
 	if installedSkillCount > 0 {
@@ -423,3 +389,35 @@ func asInt(n int) string {
 
 // _ silences errors-import when partial builds elide other uses.
 var _ = errors.New
+
+func openSecurity(cfg types.Config, opts Options) (*security.SecretsVault, *security.Mesh, error) {
+	vault := opts.VaultOverride
+	if vault == nil {
+		key, err := security.LoadOrCreateMasterKey()
+		if err != nil {
+			return nil, nil, fmt.Errorf("ensure keyfile: %w", err)
+		}
+		v, err := security.OpenVault(security.VaultOpenOptions{
+			Path: security.DefaultVaultPath(),
+			Key:  key,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("open vault: %w", err)
+		}
+		vault = v
+	}
+
+	// Build the security mesh first so it's available to the echo path too.
+	policyPath := config.ResolvePolicyPath(cfg)
+	policy := config.LoadPolicy(policyPath)
+	mesh := security.NewMesh(policy, security.MeshOptions{Secrets: vault})
+	if opts.VaultOverride == nil {
+		audit, err := security.OpenAuditLogger(security.AuditPath(cfg.DataDir))
+		if err != nil {
+			return nil, nil, err
+		}
+		mesh.Audit = audit
+	}
+
+	return vault, mesh, nil
+}

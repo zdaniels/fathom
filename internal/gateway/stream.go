@@ -54,6 +54,9 @@ func (g *Gateway) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !g.executionAllowed(w, authResult.UserID) {
+		return
+	}
 	// Need a flusher to push events as we generate them. http.ResponseWriter
 	// gives us one when the underlying transport supports it (all stdlib
 	// servers do).

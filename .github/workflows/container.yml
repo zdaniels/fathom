@@ -1,0 +1,34 @@
+name: Container and Helm
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Verify offline skill isolation
+        env:
+          FATHOM_TEST_SKILL_CONTAINER: "1"
+        run: go test -count=1 -run TestRequiredSandboxContainerBoundary ./internal/skills
+      - name: Build container
+        run: docker build -t fathom:test .
+      - name: Smoke test deployment
+        run: sh deploy/smoke.sh fathom:test
+      - uses: azure/setup-helm@v4.3.0
+      - name: Validate chart
+        run: |
+          helm lint helm --set image.repository=fathom --set image.tag=test
+          helm template smoke helm --set image.repository=fathom --set image.tag=test > /tmp/fathom-chart.yaml
+          helm template smoke helm --set image.repository=fathom --set image.tag=test --set configSecret=fathom-config --set credentialsSecret=fathom-keys --set persistence.enabled=false > /tmp/fathom-secret-chart.yaml
+      - name: Reject unsafe chart scale and missing image
+        run: |
+          if helm template smoke helm --set image.repository=fathom --set image.tag=test --set replicaCount=2; then exit 1; fi
+          if helm template smoke helm; then exit 1; fi

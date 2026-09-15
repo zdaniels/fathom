@@ -104,6 +104,9 @@ type settingsPatch struct {
 }
 
 func (g *Gateway) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if g.settingsGuard != nil && !g.settingsGuard(w, r) {
+		return
+	}
 	// Reachability gate. The settings API can enable shell and rewrite the
 	// security policy. In personal mode the gateway runs on the user's own
 	// machine, so this is restricted to same-machine (loopback) callers —

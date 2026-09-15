@@ -178,6 +178,9 @@ func (l *Loop) processWithProviderUsage(ctx context.Context, msg types.ChannelMe
 //
 // ProcessWithModel and the /review path both go through here.
 func (l *Loop) processWithProviderInner(ctx context.Context, msg types.ChannelMessage, session types.Session, provider llm.Provider, outUsage *llm.Usage) (string, error) {
+	if !l.mesh.Policy.UserAllowed(session.UserID) {
+		return "", fmt.Errorf("execution role required")
+	}
 	root := l.tracer.StartSpan(ctx, "agent.process")
 	root.SetAttr("session.id", session.ID).
 		SetAttr("user.id", session.UserID).
@@ -209,6 +212,11 @@ func (l *Loop) processWithProviderInner(ctx context.Context, msg types.ChannelMe
 		}
 	}
 
+	if l.mesh.Audit != nil {
+		if err := l.mesh.Audit.Err(); err != nil {
+			return "", fmt.Errorf("audit unavailable: %w", err)
+		}
+	}
 	toolDefs := l.tools.LLMDefs()
 	cb := NewContextBuilder(l.persona).
 		SetToolCatalog(toolDefs).

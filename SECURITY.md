@@ -16,10 +16,10 @@ releases at present.
 
 ## Deployment boundary
 
-The current agent is intended for trusted local use. Team/enterprise isolation,
-SSO, audit persistence, and admin hardening remain incomplete. Review the
-[current limitations](README.md#team-and-enterprise-free-but-experimental)
-before deployment. Do not treat optional subprocess wrappers as a complete
-sandbox for hostile third-party code.
+Each agent instance is a trusted shared workspace. Instance operators may use
+policy-allowed host tools; unrelated tenants require separate container/host,
+credential, and storage boundaries. Tenant records alone do not provide isolation.
+See [deployment boundaries](README.md#deployment-and-isolation), including the
+fail-closed Docker mode for offline untrusted skills and OIDC/admin configuration.
 
 Third-party dependencies retain their own security reporting channels.

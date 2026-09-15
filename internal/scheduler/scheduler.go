@@ -129,6 +129,10 @@ func (s *Scheduler) RunNow(ctx context.Context, id string) (string, error) {
 
 func (s *Scheduler) runJob(ctx context.Context, job Job, runAt time.Time) {
 	s.mu.Lock()
+	if _, busy := s.inFlight[job.ID]; busy {
+		s.mu.Unlock()
+		return
+	}
 	s.inFlight[job.ID] = struct{}{}
 	s.mu.Unlock()
 	defer func() {

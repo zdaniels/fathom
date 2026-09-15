@@ -1,0 +1,14 @@
+.git
+.env*
+*.pem
+*.key
+*.db
+*.db-*
+*.log
+data
+fathom
+fathom-gateway
+node_modules
+**/node_modules
+.codex
+.agents

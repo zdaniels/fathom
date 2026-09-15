@@ -18,9 +18,10 @@ subscriptions, and infrastructure can have their own costs.
 
 ## Current status
 
-The personal agent runs locally. Team and enterprise modes expose additional
-admin APIs, but their isolation, persistence, and SSO are incomplete. They are
-experimental, not ready for a shared production service or untrusted tenants.
+The personal agent runs locally. Team and enterprise modes add persistent roles,
+admin APIs, audit storage, and optional OIDC login. Each agent instance is one
+trusted workspace: use separate containers, credentials, and volumes for unrelated
+tenants. Tenant catalog records do not provision execution environments.
 
 | Feature | Current implementation |
 | --- | --- |
@@ -28,13 +29,13 @@ experimental, not ready for a shared production service or untrusted tenants.
 | Browser UI | Chat at `/`; settings at `/settings`; pairing and installable PWA assets. |
 | Tools | File reads/writes/edits, grep/glob, shell, web search, notes, Docker-based Python, image generation, and macOS system actions. Availability depends on policy and dependencies. |
 | Skills | Bundled integrations installed with `fathom install`; Node and Python subprocess runners. |
-| Model routing | Named models and optional intent-based profiles with selected tools. See the provider startup limitation below. |
+| Model routing | Named models and optional intent-based profiles with selected tools. Unavailable credentials are skipped per named model. |
 | External coding agents | Optional Claude Code or Codex tool/takeover execution using locally installed, authenticated CLIs. |
 | Memory | Optional [Recall](https://github.com/zdaniels/recall) sidecar; not bundled or required for basic chat. |
 | Scheduling | SQLite-backed jobs and routines; cron or `--every` / `--at`; gateway must remain running. |
 | Threads and devices | SQLite-backed threads and hashed device tokens survive restarts. |
 | Vault | Encrypted secret storage with a local keyfile or supported OS keychain. |
-| Audit | Hash-chained, bounded **in-memory** events; no durable agent audit store. |
+| Audit | Hash-chained SQLite events survive restarts; `fathom audit` reads the same data directory. |
 | Team/enterprise | Role and tenant administration plus audit-report exports; important limitations below. |
 
 There are currently no published releases or Homebrew packages for this
@@ -43,7 +44,7 @@ for future releases; they do not themselves provide downloadable binaries.
 
 ## Build and run
 
-Requires Go 1.25 or newer. Node 22.6+ is needed for TypeScript skills; Python
+Requires Go 1.26 or newer. Node 22.6+ is needed for TypeScript skills; Python
 skills require Python 3. Docker is optional and needed for `python_exec`.
 
 ```bash
@@ -167,12 +168,10 @@ to every model. Credentials resolve from the vault or environment.
 Named models use `llm.models` and `llm.default`. Optional `routing.profiles`
 select models and tool sets based on an intent classifier.
 
-**Known startup issue:** the non-routed factory checks a legacy provider key
-before constructing the named-model registry. A local-only named-model config
-can incorrectly require an Anthropic key; some other providers can incorrectly
-require an OpenAI key. For an all-Ollama configuration, explicitly set
-`llm.provider: ollama` as well as the named entries. The provider gate needs a
-code fix; do not add an unrelated paid-provider key just to satisfy it.
+Readiness is based on the actual provider registry. An all-local registry needs
+no unrelated hosted-provider key. Missing credentials skip optional named models;
+unknown providers are configuration errors. If every model lacks credentials,
+the agent starts in echo mode and `/api/v1/ready` returns 503.
 
 ### External-agent takeover
 
@@ -218,7 +217,7 @@ instruction to the scheduled prompt; it is not a separate isolation boundary.
 
 The default profile includes the scheduler, threads, skill bridging, and optional
 memory. The minimal profile skips those integrations but retains the agent,
-built-in tools, vault, and security mesh, including its in-memory audit logger.
+built-in tools, vault, and security mesh, including its persistent audit logger.
 
 Threads are user-scoped and persisted. Deletion is soft; an automatic permanent
 purge is not implemented. Device pairing shares the initiating user's identity;
@@ -235,30 +234,66 @@ FATHOM_CONFIG=/absolute/path/fathom.config.yaml FATHOM_MODE=enterprise fathom st
 
 Use `team` instead of `enterprise` for team mode. Stop an existing gateway before
 starting another on the same port. A restart is required to change modes.
-`fathom init --enterprise` also writes a starter configuration, but cannot make
-the unfinished SSO integration functional.
+`fathom init --enterprise` writes a starter configuration. Configure your identity
+provider separately if you want SSO; token authentication works without SSO.
 
-| Area | What is actually available |
+| Area | What is available |
 | --- | --- |
-| Admin access | Bearer-token authentication; bootstrap `admin` role; role-gated admin endpoints and settings writes. |
-| Roles | Admin/operator/viewer assignments in memory. Tool-level role enforcement is incomplete. |
-| Tenants | In-memory records and configuration. Not connected to isolated agent workspaces or enforced tenant quotas. |
-| SSO/OIDC | Helper code exists, but login/callback routes and gateway authentication integration are missing. Configuring SSO does not enable a working login. |
-| Reports | JSON/CSV audit-event exports labelled SOC2/HIPAA/GDPR. These are not certifications or framework-specific compliance assessments. |
-| Persistence | Role/tenant assignments and agent audit events are lost on restart. |
-| Hardening | Admin network allow-lists, rate limits, and token re-authentication exist, but settings coverage and validation need fixes. |
+| Admin access | Bootstrap `admin` role; bearer authentication; role checks on admin and settings mutations. |
+| Roles | SQLite-backed admin/operator/viewer assignments. Only instance admins and operators can invoke the agent, including streams and thread messages. Viewers can inspect their own history. |
+| Tenants | Persistent catalog and scoped role records. Scoped tenant roles cannot grant access to the shared instance runtime. Separate deployments provide isolation; catalog quotas and model settings do not configure runtime resources. |
+| SSO/OIDC | Discovery, signed ID-token verification, issuer/audience/expiry/nonce checks, browser-bound state, PKCE, and expiring gateway sessions. |
+| Reports | JSON/CSV event exports labelled SOC2/HIPAA/GDPR; these are event summaries, not certifications or compliance assessments. |
+| Persistence | Roles/tenants in `dataDir/enterprise.db`; agent audit chain in `dataDir/audit.db`. Protect and back up this directory. |
+| Hardening | Validated IP allow-lists and rate limits cover admin and settings. Optional step-up requires fresh OIDC authentication. |
 
-Keep team/enterprise deployments local and restricted to trusted users until
-these gaps are addressed. No purchase will unlock missing functionality.
+### Enable OIDC login
+
+Register the exact callback URL with your identity provider, then configure:
+
+```yaml
+mode: enterprise
+enterprise:
+  sso:
+    issuer: https://identity.example.com
+    clientId: fathom
+    clientSecret: YOUR_CLIENT_SECRET
+    redirectUri: https://agent.example.com/api/v1/sso/callback
+  admin:
+    requireStepUp: true
+    allowCidrs: ["127.0.0.1/32"]
+```
+
+Store this configuration privately (or use a Kubernetes Secret). Configure your
+reverse proxy/TLS and allow-list for your actual network. CIDRs match the immediate
+peer, not forwarded headers; enforce client CIDRs at the ingress behind a proxy.
+HTTP issuer/callback URLs are allowed only for loopback development.
+
+Open `/api/v1/sso/login` in a browser. The callback returns JSON with a one-hour
+`token` and stable `user.id`; paste the token into the existing browser token
+prompt or use it as a bearer token. There is no automatic role elevation from
+email or group claims. A bootstrap admin assigns the returned ID an instance
+role through `/api/v1/admin/users/role` (omit `tenantId`). New SSO users are viewers.
+SSO sessions expire after one hour and on restart; they cannot mint persistent
+paired-device tokens.
+
+A fresh admin login also returns a `stepUpToken`, valid for five minutes and one
+mutation. Send it as `X-Step-Up-Token` with that same user's bearer token. Enable
+`requireStepUp` **after** assigning your first OIDC admin using the bootstrap
+admin token. Reusing an ordinary admin token as step-up is rejected. The identity
+provider must return a recent `auth_time` when asked for fresh authentication.
+
+Enterprise features are all MIT-licensed. There is no purchase or license key.
 
 ## HTTP API
 
-Except health and static UI assets, the following application endpoints require
+Except health/readiness, OIDC login/callback, and static UI assets, the following application endpoints require
 a bearer token; pairing claim uses its short-lived code instead.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/v1/health` | HTTP liveness and feature information |
+| GET | `/api/v1/ready` | 200 when a backend is configured, 503 in echo mode; does not probe upstream availability |
 | POST | `/api/v1/message` | Send `{"text":"Hello"}` |
 | POST | `/api/v1/stream` | Stream an agent reply |
 | GET | `/api/v1/session` | Caller sessions |
@@ -272,29 +307,73 @@ a bearer token; pairing claim uses its short-lived code instead.
 
 Team and enterprise additionally mount `/api/v1/admin/users`,
 `/api/v1/admin/users/role`, `/api/v1/admin/tenants`, `/api/v1/admin/compliance`,
-and `/api/v1/audit`. There is no working `/api/v1/sso/*` login flow.
+and `/api/v1/audit`. Configured enterprise SSO mounts `/api/v1/sso/login` and
+`/api/v1/sso/callback`.
 
-The agent audit API reads only the running process's retained entries.
-`fathom audit` currently constructs a separate logger, so it cannot retrieve
-past gateway/chat activity. Persistent audit storage and a connected CLI are
-still needed.
+`fathom audit --json` reads and verifies `dataDir/audit.db` without starting a
+model or sidecar. Use the same `FATHOM_CONFIG` as your running agent. The audit
+API accepts `limit` from 0 to 10000. Audit writes are transactional; storage
+failures stop model/tool dispatch and admin mutations. Back up the database;
+there is no automatic retention policy. Hash chains detect edits within the
+stored history, but cannot detect wholesale replacement by a privileged host
+administrator without an externally retained checkpoint.
 
-## Deployment and isolation limits
+## Deployment and isolation
 
-- The default listener is loopback. LAN access requires an appropriate bind
-  address. There is no built-in TLS termination.
-- Pairing, Tailscale address detection, an optional Cloudflare Tunnel helper,
-  and an external relay client exist. External services need their own setup.
-- Skill subprocess isolation depends on the OS and installed tools. Linux
-  bubblewrap support is opt-in; unsupported or missing sandbox tools fall back
-  to an ordinary subprocess. Treat installed skills as trusted code.
-- Docker and Helm files are starting points, not a verified production install.
-  The Compose policy mount is not selected by its current defaults. Helm lacks
-  complete writable state/cache mounts and provisioning for credentials;
-  `auth.mode`, `encryption.kms`, and `audit.siem` values are not wired through.
-  No container image is currently published by this repository's release workflow.
-- Charon, Chasm, Beacon, and Sigil clients exist, but those external services are
-  not bundled in this repository. Fathom's core can run without them.
+The default listener is loopback. LAN access requires an appropriate bind
+address. Terminate HTTPS with your ingress or reverse proxy.
+
+### Skills
+
+The default subprocess mode is for **trusted installed code**. Its optional OS
+wrappers protect selected files but are not a complete boundary for hostile code.
+For offline untrusted skills, set `FATHOM_SKILL_SANDBOX=required`. This requires a
+trusted local Docker daemon and uses disposable non-root containers with no
+network, a read-only filesystem, resource limits, and read-only mounts of only
+the runner and selected skill directory. Missing Docker or a failed container
+stops the invocation; it never falls back to a host subprocess. This mode does
+not support network-dependent skills or persistent writes. Do not place secrets
+inside skill directories. Only explicitly supplied invocation secrets are exposed.
+
+`FATHOM_SKILL_SANDBOX=trusted` explicitly selects the trusted subprocess mode;
+`1` retains the legacy Linux bubblewrap hardening option. Unknown values fail.
+The external Chasm runtime is separately configured and must enforce its own
+isolation. Charon, Chasm, Beacon, and Sigil services are not bundled.
+
+### Docker / Compose
+
+Edit `deploy/container.config.yaml` and `deploy/container.policy.yaml`, then run:
+
+```bash
+docker compose up --build -d
+```
+
+The example uses a host Ollama server and `llama3.2` (install the model first).
+For hosted models, select the provider and supply credentials via environment or
+an untracked env file. The browser UI is `http://127.0.0.1:8790`. State, vault,
+threads, devices, and cache live on the `/data` volume. The config/policy mounts
+are read-only: edit the source files and restart to change them. Do not mount
+your host home or Docker socket into the agent container.
+
+### Helm
+
+Build and push an image to a registry you control, then supply its repository
+and tag explicitly. The chart does not assume an unpublished `latest` image.
+
+```bash
+helm upgrade --install fathom ./helm \
+  --set image.repository=YOUR_REGISTRY/fathom --set image.tag=YOUR_TAG \
+  --set credentialsSecret=fathom-provider-keys
+```
+
+Create `fathom-provider-keys` first with the required provider environment keys.
+Set `config.llm` in values for model configuration. For private configuration
+such as OIDC credentials, set `configSecret` to a Secret containing `config.yaml`.
+The chart creates a PVC, mounts config/policy, and provisions writable `/data`
+and `/tmp` for UID/GID 65532. It requires one replica per instance; use separate
+releases for unrelated tenants. Unsupported KMS/SIEM/auth-mode values were removed.
+CI builds and smoke-tests the container and validates chart rendering. This
+repository does not yet publish a container image.
 
 ## Separate LLM proxy binary
 
@@ -312,15 +391,16 @@ are not implemented. It is included under the same MIT license.
 ## Development
 
 ```bash
+node --test internal/gateway/web/chat.test.cjs
 go build ./...
 go vet ./...
 go test -race -count=1 -timeout=5m ./...
 ```
 
-CI checks Linux and macOS plus the release configuration. A local Docker test
-currently misclassifies “Docker installed but daemon unavailable” as “Docker
-missing”; this can fail even when CI passes. Tests do not constitute a security
-audit or prove every provider/integration works against its live service.
+CI checks Linux/macOS builds and race tests, release configuration, container
+startup, and Helm rendering. OIDC tests use a local signed-token test provider;
+provider integrations still need credentials and live-service validation for your
+deployment. A passing test suite is not a security certification.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
 [SECURITY.md](SECURITY.md). Some architecture comments describe intended future

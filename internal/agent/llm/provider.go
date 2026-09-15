@@ -5,6 +5,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/zdaniels/fathom/pkg/types"
@@ -77,6 +78,14 @@ type SecretLookup func(name string) (string, error)
 // New constructs the right provider for the configured LLMConfig. Returns
 // an error if the provider is unknown or the required secret is missing.
 func New(cfg types.LLMConfig, lookup SecretLookup) (Provider, error) {
+	originalLookup := lookup
+	lookup = func(name string) (string, error) {
+		key, err := originalLookup(name)
+		if err != nil || key == "" {
+			return "", &MissingCredentialError{Name: name, Err: err}
+		}
+		return key, nil
+	}
 	switch cfg.Provider {
 	case "openai":
 		key, err := lookup("OPENAI_API_KEY")
@@ -247,3 +256,18 @@ func (e *ProviderError) Error() string {
 }
 
 func (e *ProviderError) Unwrap() error { return e.Err }
+
+// MissingCredentialError distinguishes incomplete setup from invalid configuration.
+type MissingCredentialError struct {
+	Name string
+	Err  error
+}
+
+func (e *MissingCredentialError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("missing credential %s: %v", e.Name, e.Err)
+	}
+	return fmt.Sprintf("missing credential %s", e.Name)
+}
+
+func (e *MissingCredentialError) Unwrap() error { return e.Err }

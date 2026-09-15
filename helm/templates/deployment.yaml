@@ -1,3 +1,4 @@
+{{- if ne (int .Values.replicaCount) 1 }}{{ fail "Fathom requires replicaCount=1 per instance" }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,35 +6,51 @@ metadata:
   labels:
     app: fathom
 spec:
+  strategy:
+    type: Recreate
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
       app: fathom
+      app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
         app: fathom
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       securityContext:
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
         runAsUser: {{ .Values.securityContext.runAsUser }}
       containers:
         - name: fathom
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ required "image.repository is required" .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.port }}
               protocol: TCP
+          {{- if .Values.credentialsSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.credentialsSecret | quote }}
+          {{- end }}
           env:
-            - name: FANTAZM_HOST
+            - name: FATHOM_CONFIG
+              value: /etc/fathom/config/config.yaml
+            - name: FATHOM_POLICY
+              value: /etc/fathom/policy/policy.yaml
+            - name: FATHOM_HOST
               value: "0.0.0.0"
-            - name: FANTAZM_PORT
+            - name: FATHOM_PORT
               value: "{{ .Values.service.port }}"
-            - name: FANTAZM_DATA_DIR
+            - name: FATHOM_DATA_DIR
               value: "/data"
-            - name: FANTAZM_MODE
+            - name: FATHOM_MODE
               value: "{{ .Values.mode }}"
           securityContext:
+            allowPrivilegeEscalation: false
             readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
             capabilities:
               drop:
@@ -50,14 +67,37 @@ spec:
             periodSeconds: 30
           readinessProbe:
             httpGet:
-              path: /api/v1/health
+              path: /api/v1/ready
               port: {{ .Values.service.port }}
             initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: config
+              mountPath: /etc/fathom/config
+              readOnly: true
+            - name: policy
+              mountPath: /etc/fathom/policy
+              readOnly: true
             - name: data
               mountPath: /data
       volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Mi
+        - name: config
+          {{- if .Values.configSecret }}
+          secret:
+            secretName: {{ .Values.configSecret | quote }}
+          {{- else }}
+          configMap:
+            name: {{ .Release.Name }}-fathom-config
+          {{- end }}
+        - name: policy
+          configMap:
+            name: {{ .Release.Name }}-fathom-config
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

@@ -75,7 +75,7 @@ func TestAdminDeniedAttemptIsAudited(t *testing.T) {
 
 func TestAdminIPAllowListBlocksOutsiders(t *testing.T) {
 	a := adminWith("root", func(a *AdminAPI) {
-		a.AllowNets = parseCIDRs([]string{"10.0.0.0/8"})
+		a.AllowNets, _ = parseCIDRs([]string{"10.0.0.0/8"})
 	})
 	// Outside the allow-list → invisible (404), even though authed admin.
 	w := httptest.NewRecorder()

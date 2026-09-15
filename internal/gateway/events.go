@@ -126,7 +126,11 @@ func (g *Gateway) handleEvents(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusMethodNotAllowed, "GET only")
 		return
 	}
-	if _, ok := g.authenticate(w, r); !ok {
+	authRes, ok := g.authenticate(w, r)
+	if !ok {
+		return
+	}
+	if !g.executionAllowed(w, authRes.UserID) {
 		return
 	}
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
