@@ -209,8 +209,157 @@
       }),
     );
   }
+  // A compact replacement hunk: unchanged prefix/suffix are collapsed. File
+  // content always goes through textContent, including markup in source files.
+  function fileDiff(target, file) {
+    if (!file.preview) {
+      target.append(
+        node("p", "Text preview unavailable (binary, link, or preview limit)."),
+      );
+      return;
+    }
+    const before = file.before ? file.before.split("\n") : [];
+    const after = file.after ? file.after.split("\n") : [];
+    let start = 0,
+      end = 0;
+    while (
+      start < before.length &&
+      start < after.length &&
+      before[start] === after[start]
+    )
+      start++;
+    while (
+      end < before.length - start &&
+      end < after.length - start &&
+      before[before.length - 1 - end] === after[after.length - 1 - end]
+    )
+      end++;
+    const pre = node("pre", "", "file-diff");
+    const line = (prefix, text, cls) =>
+      pre.append(node("span", prefix + text + "\n", cls));
+    if (start > 3) line(" ", `… ${start - 3} unchanged lines …`, "muted");
+    for (let i = Math.max(0, start - 3); i < start; i++) line(" ", before[i]);
+    for (let i = start; i < before.length - end; i++)
+      line("-", before[i], "diff-removed");
+    for (let i = start; i < after.length - end; i++)
+      line("+", after[i], "diff-added");
+    for (
+      let i = after.length - end;
+      i < Math.min(after.length, after.length - end + 3);
+      i++
+    )
+      line(" ", after[i]);
+    if (end > 3) line(" ", `… ${end - 3} unchanged lines …`, "muted");
+    if (file.before === file.after)
+      target.append(
+        node(
+          "p",
+          file.kind === "modified"
+            ? "No text changes (file metadata changed)."
+            : "Empty file.",
+        ),
+      );
+    else target.append(pre);
+  }
+  async function loadEvidence(t) {
+    const workspace = state.workspace;
+    const target = $("run-evidence");
+    target.replaceChildren(node("p", "Loading recorded evidence…"));
+    try {
+      const records = await api(`/${workspace}/tasks/${t.id}/evidence`);
+      if (state.workspace !== workspace || state.task !== t) return;
+      target.replaceChildren();
+      if (!records.length)
+        target.append(
+          node(
+            "p",
+            t.state === "running"
+              ? "Evidence will appear when this run finishes."
+              : "No recorded evidence yet. Start a new builder run to capture file changes and test results.",
+          ),
+        );
+      for (const run of records) {
+        target.append(
+          node(
+            "h3",
+            `${run.role === "builder" ? "Builder" : "Reviewer"} · ${new Date(run.finishedAt).toLocaleString()}`,
+          ),
+        );
+        if (run.error)
+          target.append(
+            node("p", "Run failed: " + run.error, "evidence-warning"),
+          );
+        if (run.warning)
+          target.append(node("p", run.warning, "evidence-warning"));
+        if (run.role === "builder") {
+          target.append(
+            node(
+              "p",
+              run.warning
+                ? "File comparison is incomplete."
+                : `${run.changes.length} changed files`,
+            ),
+          );
+          for (const file of run.changes) {
+            const details = node("details", "", "evidence-file");
+            details.append(node("summary", `${file.kind} · ${file.path}`));
+            let rendered = false;
+            details.ontoggle = () => {
+              if (!details.open || rendered) return;
+              rendered = true;
+              details.append(
+                node(
+                  "small",
+                  `Permissions: ${file.beforeMode.toString(8)} → ${file.afterMode.toString(8)}`,
+                ),
+              );
+              fileDiff(details, file);
+            };
+            target.append(details);
+          }
+        }
+        const tests = run.commands.filter((c) => c.kind === "test");
+        target.append(
+          node(
+            "p",
+            tests.length
+              ? `${tests.length} recorded test commands · ${tests.filter((c) => c.exitCode !== 0).length} with nonzero exit status`
+              : "No test commands recorded. Shell commands below may contain additional checks.",
+          ),
+        );
+        target.append(
+          node(
+            "small",
+            "Exit 0 means the command succeeded; it does not guarantee correctness.",
+          ),
+        );
+        for (const command of run.commands) {
+          const details = node("details", "", "evidence-command");
+          details.append(
+            node(
+              "summary",
+              `${command.kind === "test" ? "Test" : "Shell"} · exit ${command.exitCode} · ${(command.durationMs / 1000).toFixed(1)}s · ${command.command.split("\n")[0].slice(0, 100)}`,
+            ),
+          );
+          details.append(node("pre", "$ " + command.command));
+          details.append(node("pre", command.output || "(no output)"));
+          if (command.truncated)
+            details.append(
+              node("p", "Command or output shortened for display.", "muted"),
+            );
+          target.append(details);
+        }
+      }
+    } catch (error) {
+      if (state.workspace === workspace && state.task === t)
+        target.replaceChildren(
+          node("p", "Could not load evidence: " + error.message),
+        );
+    }
+  }
   function openTask(t) {
     state.task = t;
+    loadEvidence(t);
     $("task-status").textContent = "";
     $("edit-title").value = t.title;
     $("edit-description").value = t.description;
@@ -384,6 +533,11 @@
       report(e);
     }
   };
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.warn("SW registration failed:", error);
+    });
+  }
   init().catch(report);
   setInterval(() => {
     if (!document.hidden && !state.busy) refresh().catch(report);

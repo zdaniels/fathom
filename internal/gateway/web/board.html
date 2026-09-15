@@ -127,6 +127,14 @@
         ><button data-action="approve">Approve completion</button
         ><button data-action="cancel">Cancel run</button>
       </div>
+      <section aria-label="Run evidence">
+        <h2>Changes and test results</h2>
+        <p class="muted">
+          Recorded during the latest runs, before human approval. Later tasks
+          may change the shared workspace.
+        </p>
+        <div id="run-evidence" aria-live="polite"></div>
+      </section>
       <h2>Builder handoff</h2>
       <div class="prose" id="handoff"></div>
       <h2>Review</h2>

@@ -254,3 +254,32 @@ dialog {
     padding: 16px;
   }
 }
+
+.evidence-file,
+.evidence-command {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  margin: 10px 0;
+  padding: 10px;
+  overflow-wrap: anywhere;
+}
+summary {
+  cursor: pointer;
+}
+.file-diff {
+  background: var(--bg);
+  padding: 12px;
+  overflow: auto;
+  max-height: 420px;
+}
+.diff-added {
+  background: #17432d;
+  color: #c1f5d6;
+}
+.diff-removed {
+  background: #4b2430;
+  color: #ffccd5;
+}
+.evidence-warning {
+  color: #ffd38a;
+}
