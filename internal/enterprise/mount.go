@@ -88,6 +88,15 @@ func Mount(gw *gateway.Gateway, cfg types.Config, mesh *security.Mesh) (*Mounted
 		AuthFn:     authFn,
 	}
 
+	admin.CreateAccount = func(name string) (string, string, error) {
+		id := "user:" + security.GenerateID()
+		if err := rbac.AssignRole(id, core.RoleViewer, "admin", ""); err != nil {
+			return "", "", err
+		}
+		token, err := gw.Auth.CreateAPIToken(id, name)
+		return id, token, err
+	}
+
 	// Belt-and-suspenders hardening for the admin surface, from
 	// cfg.Enterprise.Admin (+ FANTAZM_ADMIN_ALLOW_CIDRS for the allow-list).
 	var cidrErr error
@@ -159,7 +168,12 @@ func Mount(gw *gateway.Gateway, cfg types.Config, mesh *security.Mesh) (*Mounted
 		mounted.SSO = sso
 		admin.StepUpAuth = sso.ConsumeStepUp
 		gw.SetExtensionHandler(func(w http.ResponseWriter, r *http.Request) bool {
-			if sso.Handle(w, r, func(user string) (string, error) { return gw.Auth.CreateSessionToken(user, time.Hour) }, func(user string) bool {
+			if sso.Handle(w, r, func(user string) (string, error) {
+				if err := rbac.EnsureUser(user); err != nil {
+					return "", err
+				}
+				return gw.Auth.CreateSessionToken(user, time.Hour)
+			}, func(user string) bool {
 				return rbac.HasPermission(user, "", func(p core.Permissions) bool { return p.ManageUsers })
 			}) {
 				return true

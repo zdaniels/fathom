@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent team board · Fathom</title><link rel="stylesheet" href="/team.css"><script src="/board.js" defer></script></head><body>
+<header><a href="/">Fathom</a><nav><a href="/">Chat</a><a href="/settings">Settings</a><a href="/admin">People</a></nav></header>
+<main><h1>Agent team board</h1><p>Give work to a builder. Get an independent review. Decide together what ships.</p><p id="status" role="status"></p>
+<form id="workspace-form"><label>Workspace<select id="workspace"></select></label><label>New workspace<input id="workspace-name" maxlength="100" placeholder="e.g. Product team"></label><button>Create workspace</button></form>
+<p id="run-setup" class="muted"></p>
+<div id="workspace-content" hidden>
+<section><h2>New task</h2><form id="task-form"><label>Title<input id="task-title" required maxlength="250"></label><label>Task brief<textarea id="task-description" maxlength="32000" placeholder="Outcome, context, and acceptance criteria"></textarea></label><button>Create task</button></form></section>
+<div class="board" id="board" aria-label="Shared task board"></div>
+<section><h2>Workspace members</h2><p id="workspace-id" class="muted"></p><div id="members"></div><form id="member-form"><label>Fathom user ID<input id="member-id" required></label><label>Workspace role<select id="member-role"><option value="member">Member</option><option value="viewer">Viewer</option><option value="admin">Administrator</option><option value="">Remove</option></select></label><button>Save membership</button></form><p class="muted">Create accounts in People, then add their user ID here. Members can collaborate; running agents also requires the global operator or admin role in team mode.</p></section>
+<section><h2>Task connections</h2><p id="connections-note"></p><form id="import-form"><label>Connection<select id="connection"></select></label><label>Issue key<input id="issue-key" placeholder="TEAM-123" required></label><button>Import linked task</button></form><p class="muted">Import is explicit. Publishing a handoff adds a comment to the linked issue. External status and description stay managed in Linear or Jira.</p></section>
+<section><h2>Workspace files</h2><button id="download" type="button">Download workspace archive</button><p class="muted">Builders share this workspace’s files. Reviewers inspect them read-only. Each workspace has a separate offline container volume.</p></section>
+<section><h2>Activity</h2><div id="activity"></div></section>
+</div></main>
+<dialog id="task-dialog"><form id="edit-form"><label>Title<input id="edit-title" required maxlength="250"></label><label>Brief<textarea id="edit-description" maxlength="32000"></textarea></label><label>Owner<select id="edit-assignee"></select></label><label>Builder model<select id="edit-builder"></select></label><label>Reviewer model<select id="edit-reviewer"></select></label><button>Save task</button></form>
+<p id="task-state"></p><a id="external-link" target="_blank" rel="noopener noreferrer" hidden>Open linked issue</a>
+<div class="actions" id="task-actions"><button data-action="ready">Mark ready</button><button data-action="build">Start builder</button><button data-action="review">Run reviewer</button><button data-action="approve">Approve completion</button><button data-action="cancel">Cancel run</button></div>
+<h2>Builder handoff</h2><div class="prose" id="handoff"></div><h2>Review</h2><div class="prose" id="review"></div>
+<label>Comment or requested changes<textarea id="task-comment" maxlength="64000"></textarea></label><div class="actions"><button data-action="comment">Add comment</button><button data-action="changes">Request changes</button><button id="publish" type="button">Preview external comment</button><button id="close-dialog" class="secondary" type="button">Close</button></div>
+<section id="publish-preview" hidden><h2>Publish to linked issue</h2><pre id="publish-text"></pre><button data-action="publish">Publish this comment</button></section>
+<p id="task-status" role="status"></p><div id="task-activity"></div></dialog>
+</body></html>

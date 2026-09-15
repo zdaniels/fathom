@@ -191,7 +191,7 @@
     try {
       const res = await fetch("api/v1/settings", {
         method: "PATCH",
-        headers: authHeaders({ "Content-Type": "application/json" }),
+        headers: (()=>{const h=authHeaders({"Content-Type":"application/json"});try{const grant=JSON.parse(sessionStorage.getItem("fathom_step_up")||"null");if(grant&&grant.expires>Date.now()){h["X-Step-Up-Token"]=grant.token;sessionStorage.removeItem("fathom_step_up")}}catch{}return h})(),
         body: JSON.stringify(patch),
       });
       if (res.status === 403) {

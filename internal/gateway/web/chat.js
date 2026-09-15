@@ -463,44 +463,46 @@
   // === SSE === ===========================================================
 
   function subscribeSSE(threadId) {
-    // EventSource doesn't support custom headers, so we can't use it for
-    // bearer-token endpoints. Use fetch + ReadableStream instead — same
-    // SSE wire format, manual parse.
+    teardownSSE();
     const ctrl = new AbortController();
-    state.sse = { abort: () => ctrl.abort() };
-
+    let retry;
+    state.sse = { abort: () => { ctrl.abort(); clearTimeout(retry); } };
+    const active = () => !ctrl.signal.aborted && state.currentThreadId === threadId;
     fetch(`api/v1/threads/${threadId}/stream`, {
       method: "GET",
       headers: { Authorization: "Bearer " + state.token, Accept: "text/event-stream" },
       signal: ctrl.signal,
     }).then(async (res) => {
-      if (res.status === 401) { handleAuthFailure(); return; }
-      if (!res.ok) {
-        appendError(`Stream error: HTTP ${res.status}`);
-        return;
-      }
+      if (res.status === 401) { ctrl.abort(); handleAuthFailure(); return; }
+      if (!res.ok) throw new Error(`Stream error: HTTP ${res.status}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let leftover = "";
-      while (true) {
+      while (active()) {
         const { value, done } = await reader.read();
         if (done) break;
-        const chunk = leftover + decoder.decode(value, { stream: true });
-        const events = chunk.split("\n\n");
+        const events = (leftover + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n").split("\n\n");
         leftover = events.pop() || "";
-        for (const evt of events) {
-          const parsed = parseSSE(evt);
-          if (!parsed) continue;
-          if (!ctrl.signal.aborted && state.currentThreadId === threadId) handleStreamEvent(parsed);
+        for (const block of events) {
+          const parsed = parseSSE(block);
+          if (!parsed || !active()) continue;
+          if (parsed.event === "ready") {
+            // Subscribe first, then reconcile persisted history. Events racing
+            // this request use the same message-ID dedup gate.
+            const snapshot = await apiGet(`api/v1/threads/${threadId}`);
+            if (snapshot && active()) {
+              for (const message of snapshot.messages || []) renderMessage(message);
+              setTitle(snapshot.thread && snapshot.thread.title);
+              if(snapshot.running)ensureThinking();else clearThinking();
+            }
+          } else handleStreamEvent(parsed);
         }
       }
     }).catch((err) => {
-      if (err.name === "AbortError") return;
-      // Auto-reconnect after a short delay if the user is still here.
-      console.warn("SSE dropped:", err.message);
-      setTimeout(() => {
-        if (!ctrl.signal.aborted && state.currentThreadId === threadId) subscribeSSE(threadId);
-      }, 2000);
+      if (active()) console.warn("SSE dropped:", err.message);
+    }).finally(() => {
+      // A clean EOF also needs reconnection (proxy timeout, server restart).
+      if (active()) retry = setTimeout(() => { if (active()) subscribeSSE(threadId); }, 2000);
     });
   }
 
@@ -523,6 +525,9 @@
         // one) just sent a message and the agent is working on it.
         // Show the spinner if we don't already have one in flight.
         ensureThinking();
+        break;
+      case "agent_delta":
+        if(evt.data && evt.data.delta){const spinner=ensureThinking();state.liveText=((state.liveText||"")+evt.data.delta).slice(-64000);let live=spinner.querySelector(".live-response");if(!live){live=document.createElement("pre");live.className="live-response";spinner.appendChild(live)}live.textContent=state.liveText;scrollToBottom()}
         break;
       case "agent_done":
         clearThinking();
@@ -602,7 +607,7 @@
 
   function clearThinking(expected = state.remoteSpinner) {
     if (expected) expected.remove();
-    if (state.remoteSpinner === expected) state.remoteSpinner = null;
+    if (state.remoteSpinner === expected) { state.remoteSpinner = null;state.liveText=""; }
   }
 
   function appendSpinner() {

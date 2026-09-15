@@ -194,7 +194,9 @@ func (s *SSOManager) Handle(w http.ResponseWriter, r *http.Request, issue func(s
 		s.mu.Unlock()
 		out["stepUpToken"] = grant
 	}
-	respJSON(w, 200, out)
+	if !finishBrowserLogin(w, r, out) {
+		respJSON(w, 200, out)
+	}
 	return true
 }
 func (s *SSOManager) ConsumeStepUp(token string) (string, bool) {

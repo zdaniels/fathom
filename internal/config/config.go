@@ -242,6 +242,12 @@ func LoadPolicy(path string) types.PolicyConfig {
 // what they want to override.
 func mergeConfig(base, overrides types.Config) types.Config {
 	out := base
+	if overrides.Collaboration != nil {
+		out.Collaboration = overrides.Collaboration
+	}
+	if overrides.Retention != nil {
+		out.Retention = overrides.Retention
+	}
 	if overrides.Mode != "" {
 		out.Mode = overrides.Mode
 	}

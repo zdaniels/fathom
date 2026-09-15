@@ -33,6 +33,7 @@ import (
 	"github.com/zdaniels/fathom/internal/agent"
 	"github.com/zdaniels/fathom/internal/agentfactory"
 	"github.com/zdaniels/fathom/internal/auth"
+	"github.com/zdaniels/fathom/internal/streamtext"
 	"github.com/zdaniels/fathom/internal/threads"
 	"github.com/zdaniels/fathom/pkg/types"
 )
@@ -68,12 +69,14 @@ func swarmEventLabel(ev agent.SwarmEvent) string {
 // ThreadHub fans events out to per-thread subscribers. Construct one
 // per process; methods are safe for concurrent use.
 type ThreadHub struct {
-	mu   sync.RWMutex
-	subs map[string]map[chan ThreadEvent]struct{} // threadID → set of channels
+	mu     sync.RWMutex
+	closed bool
+	active map[string]bool
+	subs   map[string]map[chan ThreadEvent]struct{} // threadID → set of channels
 }
 
 func NewThreadHub() *ThreadHub {
-	return &ThreadHub{subs: map[string]map[chan ThreadEvent]struct{}{}}
+	return &ThreadHub{active: map[string]bool{}, subs: map[string]map[chan ThreadEvent]struct{}{}}
 }
 
 // Subscribe registers for events on threadID. Returns the receive
@@ -86,50 +89,75 @@ func NewThreadHub() *ThreadHub {
 func (h *ThreadHub) Subscribe(threadID string) (<-chan ThreadEvent, func()) {
 	ch := make(chan ThreadEvent, 32)
 	h.mu.Lock()
+	if h.closed {
+		close(ch)
+		h.mu.Unlock()
+		return ch, func() {}
+	}
 	if h.subs[threadID] == nil {
 		h.subs[threadID] = map[chan ThreadEvent]struct{}{}
 	}
 	h.subs[threadID][ch] = struct{}{}
 	h.mu.Unlock()
+	var once sync.Once
 	unsubscribe := func() {
-		h.mu.Lock()
-		if set, ok := h.subs[threadID]; ok {
-			delete(set, ch)
-			if len(set) == 0 {
-				delete(h.subs, threadID)
+		once.Do(func() {
+			h.mu.Lock()
+			if set, ok := h.subs[threadID]; ok {
+				if _, ok := set[ch]; ok {
+					delete(set, ch)
+					close(ch)
+				}
+				if len(set) == 0 {
+					delete(h.subs, threadID)
+				}
 			}
-		}
-		h.mu.Unlock()
-		close(ch)
+			h.mu.Unlock()
+		})
 	}
 	return ch, unsubscribe
 }
 
 // Publish fans out an event to every current subscriber of evt.ThreadID.
 // Non-blocking — full channels drop the event for that subscriber.
-func (h *ThreadHub) Publish(evt ThreadEvent) {
-	h.mu.RLock()
-	subs := h.subs[evt.ThreadID]
-	// Snapshot the channel set under the read lock so we can release
-	// before the (possibly slow) sends.
-	chans := make([]chan ThreadEvent, 0, len(subs))
-	for c := range subs {
-		chans = append(chans, c)
+func (h *ThreadHub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closed = true
+	for id, set := range h.subs {
+		for ch := range set {
+			close(ch)
+		}
+		delete(h.subs, id)
 	}
-	h.mu.RUnlock()
-	delivered := 0
-	dropped := 0
-	for _, c := range chans {
+}
+func (h *ThreadHub) Begin(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.active[id] {
+		return false
+	}
+	h.active[id] = true
+	return true
+}
+func (h *ThreadHub) End(id string)         { h.mu.Lock(); delete(h.active, id); h.mu.Unlock() }
+func (h *ThreadHub) Active(id string) bool { h.mu.RLock(); defer h.mu.RUnlock(); return h.active[id] }
+func (h *ThreadHub) Publish(evt ThreadEvent) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if evt.Type == "agent_done" || evt.Type == "agent_error" {
+		delete(h.active, evt.ThreadID)
+	}
+	for ch := range h.subs[evt.ThreadID] {
 		select {
-		case c <- evt:
-			delivered++
+		case ch <- evt:
 		default:
-			dropped++
+			// Close slow subscribers so their reconnect fetches a fresh snapshot,
+			// instead of silently losing a completion event indefinitely.
+			delete(h.subs[evt.ThreadID], ch)
+			close(ch)
 		}
 	}
-	slog.Debug("threadhub publish",
-		"type", evt.Type, "thread", evt.ThreadID,
-		"subscribers", len(chans), "delivered", delivered, "dropped", dropped)
 }
 
 // === HTTP handlers ==========================================================
@@ -316,6 +344,7 @@ func (g *Gateway) serveThreadMetadata(w http.ResponseWriter, _ *http.Request, t 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"thread":   t,
 		"messages": ensureMessages(msgs),
+		"running":  g.ThreadHub != nil && g.ThreadHub.Active(t.ID),
 	})
 }
 
@@ -451,6 +480,14 @@ func (g *Gateway) serveThreadSendMessage(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	if g.ThreadHub != nil {
+		if !g.ThreadHub.Begin(t.ID) {
+			jsonError(w, 409, "an agent is already running in this conversation")
+			return
+		}
+		defer g.ThreadHub.End(t.ID)
+	}
+
 	// Persist + publish the user message.
 	userMsg, err := g.Threads.Append(t.ID, "user", in.Text, authRes.DeviceID, userMetadata)
 	if err != nil {
@@ -494,7 +531,12 @@ func (g *Gateway) serveThreadSendMessage(w http.ResponseWriter, r *http.Request,
 	// tool calls this notifier (carried via context) just before a child
 	// loop starts, so clients can show "→ delegating to <model>". Clients
 	// that don't render the event ignore it.
-	dctx := r.Context()
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	dctx := streamtext.With(r.Context(), func(delta string) {
+		if g.ThreadHub != nil {
+			g.ThreadHub.Publish(ThreadEvent{Type: "agent_delta", ThreadID: t.ID, Delta: delta})
+		}
+	})
 	if g.ThreadHub != nil {
 		dctx = agent.WithDelegateNotifier(dctx, func(model, taskPreview string) {
 			label := "delegating"
@@ -595,6 +637,7 @@ func (g *Gateway) serveThreadStream(w http.ResponseWriter, r *http.Request, t th
 		jsonError(w, http.StatusInternalServerError, "streaming not supported by transport")
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
