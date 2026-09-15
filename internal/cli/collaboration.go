@@ -56,7 +56,7 @@ func mountBoard(gw *gateway.Gateway, cfg types.Config, result *agentfactory.Resu
 		}
 		return res.UserID, nil
 	}
-	service.CanExecute = func(user string) bool {
+	service.CanCreateWorkspace = func(user string) bool {
 		if ent == nil {
 			return true
 		}

@@ -255,7 +255,7 @@ provider separately if you want SSO; token authentication works without SSO.
 | Area | What is available |
 | --- | --- |
 | Admin access | Bootstrap `admin` role; bearer authentication; role checks on admin and settings mutations. |
-| Roles | SQLite-backed admin/operator/viewer assignments. Only instance admins and operators can invoke the agent, including streams and thread messages. Viewers can inspect their own history. |
+| Roles | SQLite-backed admin/operator/viewer assignments. Only instance admins and operators can invoke the host agent, including streams and thread messages. Global viewers can inspect their own history and run isolated board agents when granted workspace membership. |
 | Workspaces | Board tasks enforce membership and run in separate offline Docker volumes. One run per workspace, four per instance, bounded CPU/memory/turns/time. Legacy tenant catalog settings do not configure these resources. |
 | SSO/OIDC | Browser sign-in and admin step-up, discovery, verified signed tokens, issuer/audience/expiry/nonce checks, browser-bound state, PKCE, and expiring gateway sessions. |
 | Reports | JSON/CSV event exports labelled SOC2/HIPAA/GDPR; these are event summaries, not certifications or compliance assessments. |

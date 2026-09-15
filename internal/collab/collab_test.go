@@ -100,6 +100,7 @@ func TestBoardHTTPAuthorizationAndApproval(t *testing.T) {
 	s := newStore(t)
 	w, _ := s.CreateWorkspace("Team", "alice")
 	_ = s.SetMember(w.ID, "alice", "viewer", "viewer")
+	_ = s.SetMember(w.ID, "alice", "member", "member")
 	task, _ := s.CreateTask(Task{WorkspaceID: w.ID, Title: "Task"}, "alice")
 	service := &Service{Store: s, Runner: &Runner{}, Auth: func(r *http.Request) (string, error) {
 		user := r.Header.Get("Authorization")
@@ -107,7 +108,7 @@ func TestBoardHTTPAuthorizationAndApproval(t *testing.T) {
 			return "", errors.New("no token")
 		}
 		return user, nil
-	}, CanExecute: func(user string) bool { return user == "alice" }}
+	}, CanCreateWorkspace: func(user string) bool { return user == "alice" }}
 	request := func(user, method, path string, body any) int {
 		t.Helper()
 		b, _ := json.Marshal(body)
@@ -121,7 +122,7 @@ func TestBoardHTTPAuthorizationAndApproval(t *testing.T) {
 		user, method, path string
 		body               any
 		code               int
-	}{{"", "GET", "", nil, 401}, {"outsider", "GET", "/" + w.ID, nil, 404}, {"viewer", "POST", "/" + w.ID + "/tasks", map[string]string{"title": "No"}, 403}, {"alice", "POST", "/" + w.ID + "/tasks/" + task.ID + "/approve", map[string]int{"revision": 1}, 409}, {"alice", "POST", "/" + w.ID + "/tasks/" + task.ID + "/build", map[string]int{"revision": 1}, 503}} {
+	}{{"", "GET", "", nil, 401}, {"outsider", "GET", "/" + w.ID, nil, 404}, {"viewer", "POST", "/" + w.ID + "/tasks", map[string]string{"title": "No"}, 403}, {"alice", "POST", "/" + w.ID + "/tasks/" + task.ID + "/approve", map[string]int{"revision": 1}, 409}, {"alice", "POST", "/" + w.ID + "/tasks/" + task.ID + "/build", map[string]int{"revision": 1}, 503}, {"member", "POST", "/" + w.ID + "/tasks/" + task.ID + "/build", map[string]int{"revision": 1}, 503}, {"member", "POST", "", map[string]string{"name": "Cannot provision"}, 403}} {
 		if got := request(tc.user, tc.method, tc.path, tc.body); got != tc.code {
 			t.Fatalf("%s %s got %d want %d", tc.user, tc.path, got, tc.code)
 		}

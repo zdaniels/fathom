@@ -12,16 +12,16 @@ import (
 )
 
 type Service struct {
-	Store       *Store
-	Runner      *Runner
-	Auth        func(*http.Request) (string, error)
-	CanExecute  func(string) bool
-	Connections []Connection
-	Lookup      func(string) (string, error)
-	mu          sync.Mutex
-	runs        map[string]context.CancelFunc
-	wg          sync.WaitGroup
-	closed      bool
+	Store              *Store
+	Runner             *Runner
+	Auth               func(*http.Request) (string, error)
+	CanCreateWorkspace func(string) bool
+	Connections        []Connection
+	Lookup             func(string) (string, error)
+	mu                 sync.Mutex
+	runs               map[string]context.CancelFunc
+	wg                 sync.WaitGroup
+	closed             bool
 }
 
 func (s *Service) Close() {
@@ -79,7 +79,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == "POST" {
-			if !s.CanExecute(user) {
+			if !s.CanCreateWorkspace(user) {
 				fail(w, 403, ErrForbidden)
 				return
 			}
@@ -314,10 +314,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		t.State = "done"
 	case "build", "review":
-		if !s.CanExecute(user) {
-			fail(w, 403, ErrForbidden)
-			return
-		}
+		// Membership grants only the isolated workspace runner. It must not require
+		// the global operator role, which also grants host-agent execution.
 		if err = s.Runner.Ready(); err != nil {
 			fail(w, 503, err)
 			return
@@ -396,7 +394,7 @@ func (s *Service) run(ctx context.Context, cancel context.CancelFunc, t Task, re
 	defer cancel()
 	result, err := s.Runner.Run(ctx, t, review, func() bool {
 		role := s.Store.Role(t.WorkspaceID, user)
-		return (role == "member" || role == "admin") && s.CanExecute(user)
+		return role == "member" || role == "admin"
 	})
 	s.mu.Lock()
 	defer s.mu.Unlock()

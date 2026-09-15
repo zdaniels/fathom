@@ -26,25 +26,27 @@ Private chat history remains private; adding workspace members does not share it
 Set `mode: team` (or `enterprise` for OIDC) in the instance config and restart.
 At `/admin`, sign in with the bootstrap admin token and create an account.
 The new account starts as a viewer. Give its token to the teammate privately,
-then grant the global `operator` role if they should run agents. Add the returned
-user ID to the workspace at `/board`.
+then add the returned user ID as a workspace member at `/board`. Keep the global
+viewer role for teammates who should only use isolated workspace agents. Global
+operator access also permits the trusted host agent and is not needed for the board.
 
 Workspace roles are independent of global roles:
 
 | Workspace role | Access |
 | --- | --- |
 | Viewer | Read tasks, members, activity and workspace archives |
-| Member | Create/edit tasks, comment, request changes, approve, import/publish linked tasks |
+| Member | Create/edit tasks, run isolated builders/reviewers, comment, request changes, approve, import/publish linked tasks |
 | Admin | Member access plus adding/removing members and changing workspace roles |
 
-Starting a builder/reviewer also requires the global operator/admin execution
-permission in team/enterprise mode. Membership and execution access are checked
-again between model/tool calls. Revocation does not roll back an already executed
+Creating a workspace requires global operator/admin permission in team/enterprise
+mode. Running its isolated builders/reviewers requires workspace membership only;
+it does not grant access to host-agent tools. Membership is checked again
+between model/tool calls. Revocation does not roll back an already executed
 command. Every workspace must retain an administrator. Global administrators do
 not implicitly become workspace members.
 
 OIDC users can use the organization sign-in link. Their first sign-in creates a
-viewer assignment; an admin must grant execution access and workspace membership.
+viewer assignment; a workspace administrator can grant workspace membership.
 Fresh admin OIDC login provides one short-lived step-up grant for protected admin
 or settings writes. With `requireStepUp` enabled, verify again for the next write.
 
