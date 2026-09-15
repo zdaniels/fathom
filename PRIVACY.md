@@ -63,4 +63,4 @@ You own everything in `~/.fantazm/`. Delete it any time. Re-run
 `fathom init` to start over. There's no Fathom-side account or
 cookie to revoke.
 
-Questions: privacy@github.com/zdaniels/fathom.
+For security-sensitive privacy reports, use [private vulnerability reporting](https://github.com/zdaniels/fathom/security/advisories/new). For general questions, use the repository issue tracker without including private data.

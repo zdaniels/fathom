@@ -143,7 +143,7 @@ Open an issue with:
 
 For security-sensitive issues (vault escape, audit chain integrity,
 sandbox escape, prompt-injection bypass): **don't open a public
-issue**. Email security@github.com/zdaniels/fathom instead.
+issue**. Use [private vulnerability reporting](https://github.com/zdaniels/fathom/security/advisories/new) instead.
 
 ## Roadmap awareness
 
@@ -155,7 +155,6 @@ scope, file an issue and let's discuss before you write the PR.
 
 ## Licensing
 
-By contributing, you agree your contributions are licensed under the
-project's existing terms (see README). If a license decision is
-pending, contributions are held under MIT by default — we'll flip to
-the project's choice at v0.1.0 release.
+All Fathom project code, including team and enterprise features, is licensed
+under [MIT](LICENSE.md). Contributions are accepted under the same license.
+Keep third-party copyright and license notices intact.

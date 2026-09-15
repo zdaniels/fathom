@@ -2,44 +2,24 @@
 
 ## Reporting a vulnerability
 
-Email **security@github.com/zdaniels/fathom** with:
+Use [GitHub private vulnerability reporting](https://github.com/zdaniels/fathom/security/advisories/new).
+Include the affected revision, impact, and steps to reproduce. Do not put
+credentials, private conversations, or vulnerability details in public issues.
 
-- A description of the vulnerability and the impact you believe it has.
-- Steps to reproduce, ideally with a minimal proof-of-concept.
-- Your name + handle if you'd like credit in the disclosure.
+This is a community-maintained project; there is no guaranteed response SLA.
+Reports are triaged privately and fixes are published when ready.
 
-Please do **not** open a public GitHub issue — that's the canonical
-way to get an attacker reading along while we're still patching.
+## Supported code
 
-## What to expect
+Security work targets the current `main` branch. There are no published binary
+releases at present.
 
-| When | What |
-|---|---|
-| Within 48 hours | Acknowledgement that we received your report. |
-| Within 7 days | Triage decision: confirmed / needs more info / not-a-vuln, with reasoning. |
-| Within 30 days | Patch shipped for confirmed criticals + high-severity issues. |
-| At fix time | Credit to you in the release notes + a public advisory if you want one. |
+## Deployment boundary
 
-For lower-severity issues we may bundle the fix into the next minor
-release rather than ship out-of-band — we'll tell you the plan in
-the triage response.
+The current agent is intended for trusted local use. Team/enterprise isolation,
+SSO, audit persistence, and admin hardening remain incomplete. Review the
+[current limitations](README.md#team-and-enterprise-free-but-experimental)
+before deployment. Do not treat optional subprocess wrappers as a complete
+sandbox for hostile third-party code.
 
-## Supported versions
-
-Only the **latest minor release** receives security patches. The
-project moves quickly during pre-1.0; please run the most recent
-version before reporting.
-
-## Out of scope
-
-- Vulnerabilities in third-party dependencies that aren't reachable
-  from this package's actual code paths. Report those upstream; we
-  bump versions when fixes land.
-- Social-engineering / phishing of maintainers.
-- Self-XSS or anything requiring an attacker who already has control
-  of the victim's machine.
-
-## Hall of fame
-
-Researchers who've helped harden Fathom — listed with permission. Be
-the first by reporting something! See above for the email.
+Third-party dependencies retain their own security reporting channels.
