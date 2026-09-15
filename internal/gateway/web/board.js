@@ -79,7 +79,21 @@
   async function api(path = "", body) {
     const r = await fetch("/api/v1/board" + path, {
       method: body === undefined ? "GET" : "POST",
-      headers: headers(),
+      headers: (() => {
+        const h = headers();
+        if (body !== undefined && /\/connections\//.test(path)) {
+          try {
+            const grant = JSON.parse(
+              sessionStorage.getItem("fathom_step_up") || "null",
+            );
+            if (grant && grant.expires > Date.now()) {
+              h["X-Step-Up-Token"] = grant.token;
+              sessionStorage.removeItem("fathom_step_up");
+            }
+          } catch {}
+        }
+        return h;
+      })(),
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await r.json();
@@ -186,6 +200,7 @@
           state.data = null;
           state.workspace = "";
           $("task-dialog").close();
+          closeConnections();
           $("workspace-content").hidden = true;
           $("live-status").textContent =
             "Access ended. Sign in again or choose another workspace.";
@@ -268,6 +283,9 @@
       $("connection"),
       data.connections.map((c) => c.provider),
     );
+    $("manage-connections").hidden = !data.canManageConnections;
+    if (!data.canManageConnections && $("connections-dialog").open)
+      closeConnections();
     $("import-form").hidden = !data.connections.length || !write;
     $("connections-note").textContent = data.connections.length
       ? data.connections.map((c) => c.provider + " · " + c.scope).join(", ")
@@ -544,6 +562,114 @@
       updateTaskControls();
     }
   }
+  let connectionWorkspace = "",
+    connectionRecords = [],
+    connectionBusy = false;
+  function closeConnections() {
+    $("connections-dialog").close();
+    $("connection-token").value = "";
+    connectionWorkspace = "";
+  }
+  function fillConnection() {
+    const provider = $("connection-provider").value;
+    const saved = connectionRecords.find((c) => c.provider === provider);
+    $("connection-scope").value = saved?.scope || "";
+    $("connection-site").value = saved?.site || "";
+    $("connection-email").value = saved?.email || "";
+    $("connection-token").value = "";
+    $("connection-token").required = !saved?.credentialSaved;
+    const jira = provider === "jira";
+    $("connection-scope-label").textContent = jira
+      ? "Jira project key"
+      : "Linear team UUID";
+    $("connection-scope").placeholder = jira
+      ? "TEAM"
+      : "Team UUID from Linear settings";
+    for (const field of ["site", "email"]) {
+      $("connection-" + field + "-field").hidden = !jira;
+      $("connection-" + field).required = jira;
+    }
+    $("connection-disable").disabled = !saved?.enabled;
+    $("connection-saved").textContent = saved
+      ? `${saved.enabled ? "Enabled" : "Disabled"} · ${saved.origin === "config" ? "From configuration file" : "Saved on this gateway"} · ${saved.credentialSaved ? "Token saved" : "Token required"}`
+      : "No saved connection for this provider.";
+    $("connection-status").textContent = "";
+  }
+  $("manage-connections").onclick = async () => {
+    if (connectionBusy) return;
+    const workspace = state.workspace;
+    try {
+      const records = await api(`/${workspace}/connections`);
+      if (workspace !== state.workspace || !state.data?.canManageConnections)
+        return;
+      connectionWorkspace = workspace;
+      connectionRecords = records;
+      $("connection-provider").value = "linear";
+      fillConnection();
+      $("connections-dialog").showModal();
+    } catch (error) {
+      report(error);
+    }
+  };
+  $("connection-provider").onchange = fillConnection;
+  $("connection-close").onclick = closeConnections;
+  $("connections-dialog").onclose = () => {
+    $("connection-token").value = "";
+    connectionWorkspace = "";
+  };
+  async function connectionAction(action) {
+    if (connectionBusy || !connectionWorkspace) return;
+    if (action !== "disable" && !$("connections-form").reportValidity()) return;
+    const workspace = connectionWorkspace,
+      provider = $("connection-provider").value;
+    const saved = connectionRecords.find((c) => c.provider === provider);
+    const body = { provider, revision: saved?.revision || 0 };
+    if (action !== "disable")
+      Object.assign(body, {
+        scope: $("connection-scope").value,
+        site: $("connection-site").value,
+        email: $("connection-email").value,
+        token: $("connection-token").value,
+      });
+    connectionBusy = true;
+    for (const control of $("connections-form").querySelectorAll(
+      "input,select,button",
+    ))
+      control.disabled = true;
+    $("connection-status").textContent =
+      action === "check" ? "Checking read access…" : "Saving…";
+    try {
+      const result = await api(`/${workspace}/connections/${action}`, body);
+      if (workspace !== connectionWorkspace) return;
+      if (action !== "check") {
+        $("connection-token").value = "";
+        connectionRecords = await api(`/${workspace}/connections`);
+        if (workspace !== connectionWorkspace) return;
+        fillConnection();
+        await refresh();
+      }
+      if (workspace === connectionWorkspace)
+        $("connection-status").textContent = result.status;
+    } catch (error) {
+      if (workspace === connectionWorkspace)
+        $("connection-status").textContent = error.message;
+    } finally {
+      connectionBusy = false;
+      for (const control of $("connections-form").querySelectorAll(
+        "input,select,button",
+      ))
+        control.disabled = false;
+      $("connection-disable").disabled = !connectionRecords.find(
+        (c) => c.provider === $("connection-provider").value,
+      )?.enabled;
+    }
+  }
+  $("connections-form").onsubmit = (event) => {
+    event.preventDefault();
+    connectionAction("save");
+  };
+  $("connection-check").onclick = () => connectionAction("check");
+  $("connection-disable").onclick = () => connectionAction("disable");
   $("workspace-form").onsubmit = async (e) => {
     e.preventDefault();
     try {
@@ -556,6 +682,7 @@
     }
   };
   $("workspace").onchange = () => {
+    closeConnections();
     state.task = null;
     $("task-dialog").close();
     state.workspace = $("workspace").value;

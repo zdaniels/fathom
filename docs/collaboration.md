@@ -161,12 +161,34 @@ while a workspace run is active.
 
 ## Connect Linear or Jira Cloud
 
-The instance owner configures each connection for one workspace and one external
-team/project. Copy the workspace ID from its members section. Store credentials
-in the Fathom vault or process environment; config contains only the secret name.
-Connections and secrets are never exposed to task containers. Workspace members
-can import any issue in that configured scope, so use a service account limited
-to the intended team/project.
+Open **Agent board → Task connections → Manage connections**. Setup requires
+both instance settings-admin permission and the workspace admin role. It uses the
+same network restrictions and, when configured, fresh SSO verification as Settings.
+
+1. Choose Linear or Jira Cloud. Enter a Linear team UUID, or a Jira project key,
+   `https://your-site.atlassian.net` site, and API-token account email.
+2. Enter a personal API key for Linear or an API token for Jira.
+3. **Check connection** verifies read access without saving or changing issues.
+   Publishing permission is checked separately when publishing a comment.
+4. **Save connection** stores the credential in the encrypted Fathom vault and
+   activates the connection immediately. Saving does not automatically run a check.
+
+Leave the token blank when editing to keep the saved credential. Changing a Jira
+site or email requires a new token. **Disable connection** stops imports and
+publishing while retaining the credential; save again to re-enable it. Concurrent
+edits are rejected; reopen setup to load the latest saved version.
+
+Each workspace supports one connection per provider and one external team/project
+per connection. Members can import any issue in that scope, so use credentials
+limited to the intended team/project. Credentials are never returned by the API
+or exposed to task containers. Back up the encrypted vault and its key along with
+`collaboration.db`, which stores connection metadata and secret references.
+
+### Startup configuration (optional)
+
+YAML connections remain supported, with credentials in the vault or process
+environment. Board-saved settings override YAML, including disabled connections,
+and survive restarts. YAML-only changes require a restart.
 
 ```yaml
 collaboration:
@@ -184,7 +206,7 @@ collaboration:
       tokenSecret: JIRA_TEAM_API_TOKEN
 ```
 
-After restart, choose the connection and enter an issue key such as `TEAM-123`.
+Choose an enabled connection and enter an issue key such as `TEAM-123`.
 Import copies the title/brief and retains a link to the source. Reimporting the
 same issue returns the existing task. Linear API errors are checked even when
 HTTP status is 200. Jira rich text is converted to plain text for the task brief.
@@ -212,6 +234,8 @@ All board endpoints use the same Fathom bearer token as chat.
 | GET | `/{workspace}` | Tasks, members, recent activity, non-secret connections |
 | POST | `/{workspace}/members` | `{ "userId": "…", "role": "member" }`; empty role removes |
 | POST | `/{workspace}/tasks` | Title, description, assignee, builder, reviewer |
+| GET | `/{workspace}/connections` | Setup metadata, revision and credential-presence flag; instance + workspace admin only |
+| POST | `/{workspace}/connections/{action}` | `save`, `check`, or `disable`; provider, revision, scope, optional site/email/token; same admin boundary |
 | POST | `/{workspace}/import` | `{ "provider": "linear", "id": "TEAM-123" }` |
 | POST | `/{workspace}/tasks/{task}/{action}` | Current `revision` (not required for comment), optional `text`; edit also takes task fields |
 | GET | `/{workspace}/events` | Authenticated SSE invalidations; fetch workspace snapshot on `changed` |
@@ -235,4 +259,6 @@ FATHOM_TEST_WORKSPACE_IMAGE=fathom:local go test -race -run TestWorkspaceContain
 The integration test uses a fake model and real containers to verify filesystem,
 network, secret, non-root, cross-workspace and reviewer boundaries. CI runs it
 against the freshly built image. Connector tests use fake transports and do not
-contact your Linear or Jira account.
+contact your Linear or Jira account. Connection setup tests cover permissions,
+credential isolation, failed saves, stale edits, disable behavior, restart
+persistence, rejected redirects, and provider failures.

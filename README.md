@@ -230,7 +230,9 @@ it is not an invitation that creates an independent team account.
 Open `/board` to create a workspace and tasks. A builder works on the task,
 a reviewer inspects its files read-only, and a person approves completion.
 The built-in board needs no external task service. Optional workspace-scoped
-Linear and Jira Cloud connections import issues and publish handoff comments
+Instance admins can set up Linear and Jira Cloud connections from the board’s
+**Manage connections** dialog, with credentials in the encrypted vault and changes
+active immediately. Connections import issues and publish handoff comments
 only when a member requests it. [Configuration and boundaries](docs/collaboration.md).
 
 Claude Code and Codex takeover conversation IDs persist privately in
