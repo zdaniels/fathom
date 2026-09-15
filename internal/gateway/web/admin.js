@@ -1,0 +1,92 @@
+(async () => {
+  const $ = (id) => document.getElementById(id),
+    status = $("status");
+  async function api(path, body) {
+    const headers = {
+      Authorization: "Bearer " + localStorage.getItem("fantazm_device_token"),
+    };
+    if (body) {
+      headers["Content-Type"] = "application/json";
+      const grant = JSON.parse(
+        sessionStorage.getItem("fathom_step_up") || "null",
+      );
+      if (grant && grant.expires > Date.now()) {
+        headers["X-Step-Up-Token"] = grant.token;
+        sessionStorage.removeItem("fathom_step_up");
+      }
+    }
+    const r = await fetch("api/v1/" + path, {
+      method: body ? "POST" : "GET",
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await r.json();
+    if (!r.ok) throw Error(data.error || `Request failed (${r.status})`);
+    return data;
+  }
+  async function load() {
+    try {
+      const data = await api("admin/users");
+      $("people").replaceChildren();
+      for (const user of data.users || []) {
+        if (user.tenantId) continue;
+        const row = document.createElement("div");
+        row.className = "person";
+        const name = document.createElement("span");
+        name.textContent = user.userId;
+        const role = document.createElement("select");
+        for (const value of ["viewer", "operator", "admin"]) {
+          const o = document.createElement("option");
+          o.value = o.textContent = value;
+          role.append(o);
+        }
+        role.value = user.role;
+        const save = document.createElement("button");
+        save.textContent = "Save";
+        save.onclick = async () => {
+          try {
+            await api("admin/users/role", {
+              userId: user.userId,
+              role: role.value,
+            });
+            status.textContent = "Role updated.";
+          } catch (e) {
+            status.textContent = e.message;
+          }
+        };
+        row.append(name, role, save);
+        $("people").append(row);
+      }
+      status.textContent = "";
+    } catch (e) {
+      status.textContent =
+        e.message + " Sign in or verify your identity using the link above.";
+    }
+  }
+  $("add-user").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api("admin/users/role", {
+        userId: $("user-id").value,
+        role: $("user-role").value,
+      });
+      await load();
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  };
+  $("invite").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const result = await api("admin/accounts", {
+        name: $("invite-name").value,
+      });
+      $("invite-result").textContent =
+        `User: ${result.userId}\nToken (shown once): ${result.token}`;
+      await load();
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  };
+  await load();
+})();

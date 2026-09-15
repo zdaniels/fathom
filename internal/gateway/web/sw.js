@@ -12,7 +12,7 @@
 // get cleaned up in `activate`. The CACHE_VERSION number is the truth —
 // if you forget to bump it, users may see stale UI; if in doubt, bump it.
 
-const CACHE_VERSION = "v21"; // Fathom app shell
+const CACHE_VERSION = "v23"; // Fathom app shell
 const CACHE_NAME = "fathom-shell-" + CACHE_VERSION;
 // Relative paths so this works whether the gateway is served from /
 // (LAN/Tailscale/Tunnel) or from /c/{relay_id}/ (relay.fantazm.ai).
@@ -23,6 +23,12 @@ const SHELL_ASSETS = [
   "settings.html",
   "settings.css",
   "settings.js",
+  "board.html",
+  "board.js",
+  "admin.html",
+  "admin.js",
+  "team.css",
+  "features.js",
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",

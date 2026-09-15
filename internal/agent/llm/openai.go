@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/zdaniels/fathom/internal/streamtext"
 	"github.com/zdaniels/fathom/pkg/types"
 )
 
@@ -83,6 +84,9 @@ func (o *OpenAI) Chat(ctx context.Context, messages []Message, tools []ToolDef) 
 		body["tools"] = ts
 	}
 
+	if streamtext.Enabled(ctx) {
+		body["stream"] = true
+	}
 	buf, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/chat/completions", bytes.NewReader(buf))
 	req.Header.Set("Content-Type", "application/json")
@@ -92,6 +96,9 @@ func (o *OpenAI) Chat(ctx context.Context, messages []Message, tools []ToolDef) 
 		return Response{}, &ProviderError{Provider: "openai", Msg: "request failed", Err: err}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK && streamtext.Enabled(ctx) {
+		return openAIStream(ctx, resp.Body)
+	}
 	rawResp, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
 	if resp.StatusCode != http.StatusOK {
 		return Response{}, &ProviderError{Provider: "openai", Msg: fmt.Sprintf("status %d: %s", resp.StatusCode, string(rawResp))}

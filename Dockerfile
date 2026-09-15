@@ -7,7 +7,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/fathom 
 
 FROM node:22-slim AS runtime
 RUN groupadd -g 65532 fathom && useradd -u 65532 -g 65532 -d /data/home -s /usr/sbin/nologin fathom \
-    && mkdir -p /data /etc/fathom && chown 65532:65532 /data
+    && mkdir -p /data /etc/fathom /workspace && chown 65532:65532 /data /workspace
 COPY --from=builder /out/fathom /usr/local/bin/fathom
 COPY deploy/container.config.yaml /etc/fathom/config.yaml
 COPY deploy/container.policy.yaml /etc/fathom/policy.yaml

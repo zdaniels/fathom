@@ -75,6 +75,22 @@ func TestCodexParseReadsOutputFile(t *testing.T) {
 	}
 }
 
+func TestCodexExplicitResumeID(t *testing.T) {
+	spec := CodexSpec()
+	args := strings.Join(spec.BuildArgs(CodingAgentOptions{ResumeSessionID: "thread-123", outFile: "/tmp/result"}), " ")
+	if !strings.Contains(args, "exec --sandbox workspace-write resume --json") || !strings.HasSuffix(args, "thread-123") {
+		t.Fatal(args)
+	}
+	file := filepath.Join(t.TempDir(), "out")
+	if err := os.WriteFile(file, []byte("done"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run, err := spec.Parse(CodingAgentOptions{outFile: file}, []byte("{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}\n"), nil, nil)
+	if err != nil || run.SessionID != "thread-123" {
+		t.Fatal(run, err)
+	}
+}
+
 var errTest = fmtErr("boom")
 
 func fmtErr(s string) error { return &simpleErr{s} }

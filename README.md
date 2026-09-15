@@ -19,14 +19,16 @@ subscriptions, and infrastructure can have their own costs.
 ## Current status
 
 The personal agent runs locally. Team and enterprise modes add persistent roles,
-admin APIs, audit storage, and optional OIDC login. Each agent instance is one
-trusted workspace: use separate containers, credentials, and volumes for unrelated
-tenants. Tenant catalog records do not provision execution environments.
+admin APIs, audit storage, and optional OIDC login. The agent team board adds member-scoped workspaces and offline Docker execution
+with separate volumes. Personal chat and CLI takeover still run in the instance’s
+trusted host workspace. Legacy tenant catalog records do not provision environments.
 
 | Feature | Current implementation |
 | --- | --- |
 | Terminal chat | Interactive chat, model selection, thread joining, and configuration wizard. |
-| Browser UI | Chat at `/`; settings at `/settings`; pairing and installable PWA assets. |
+| Browser UI | Chat at `/`, settings at `/settings`, shared agent board at `/board`, and user administration at `/admin` in team/enterprise mode. |
+| Collaboration | Built-in tasks, member roles, builder/reviewer handoffs, human approval, activity history, and optional Linear/Jira issue import and handoff comments. [Setup](docs/collaboration.md). |
+| Live responses | Actual text deltas from Claude Code, OpenAI-compatible APIs, Anthropic, and Ollama. Other backends return one completed response. SSE reconnects reconcile persisted messages. |
 | Tools | File reads/writes/edits, grep/glob, shell, web search, notes, Docker-based Python, image generation, and macOS system actions. Availability depends on policy and dependencies. |
 | Skills | Bundled integrations installed with `fathom install`; Node and Python subprocess runners. |
 | Model routing | Named models and optional intent-based profiles with selected tools. Unavailable credentials are skipped per named model. |
@@ -133,7 +135,7 @@ Policy defaults restrict tools. Enable the capabilities you actually need;
 installing a skill does not automatically grant every permission it requires.
 Personal-mode settings edits are restricted to local callers with authentication.
 The settings page supports policy changes immediately and marks config changes
-that need a restart. It is not a complete enterprise user/tenant administration UI.
+that need a restart. User accounts and global roles are managed at `/admin`; workspace membership is managed at `/board`.
 
 Common runtime overrides include `FATHOM_MODE`, `FATHOM_HOST`, `FATHOM_PORT`,
 `FATHOM_DATA_DIR`, `FATHOM_VAULT_PATH`, `FATHOM_VAULT_KEY`,
@@ -223,6 +225,19 @@ Threads are user-scoped and persisted. Deletion is soft; an automatic permanent
 purge is not implemented. Device pairing shares the initiating user's identity;
 it is not an invitation that creates an independent team account.
 
+## Agent team board
+
+Open `/board` to create a workspace and tasks. A builder works on the task,
+a reviewer inspects its files read-only, and a person approves completion.
+The built-in board needs no external task service. Optional workspace-scoped
+Linear and Jira Cloud connections import issues and publish handoff comments
+only when a member requests it. [Configuration and boundaries](docs/collaboration.md).
+
+Claude Code and Codex takeover conversation IDs persist privately in
+`dataDir/takeover-sessions`, scoped by provider, model, workspace, user, and
+conversation. REST and scheduled calls remain independent. Provider session
+files must also remain available to the installed CLI.
+
 ## Team and enterprise: free, but experimental
 
 There is one codebase and no paid edition. Enable the existing enterprise APIs
@@ -240,9 +255,9 @@ provider separately if you want SSO; token authentication works without SSO.
 | Area | What is available |
 | --- | --- |
 | Admin access | Bootstrap `admin` role; bearer authentication; role checks on admin and settings mutations. |
-| Roles | SQLite-backed admin/operator/viewer assignments. Only instance admins and operators can invoke the agent, including streams and thread messages. Viewers can inspect their own history. |
-| Tenants | Persistent catalog and scoped role records. Scoped tenant roles cannot grant access to the shared instance runtime. Separate deployments provide isolation; catalog quotas and model settings do not configure runtime resources. |
-| SSO/OIDC | Discovery, signed ID-token verification, issuer/audience/expiry/nonce checks, browser-bound state, PKCE, and expiring gateway sessions. |
+| Roles | SQLite-backed admin/operator/viewer assignments. Only instance admins and operators can invoke the host agent, including streams and thread messages. Global viewers can inspect their own history and run isolated board agents when granted workspace membership. |
+| Workspaces | Board tasks enforce membership and run in separate offline Docker volumes. One run per workspace, four per instance, bounded CPU/memory/turns/time. Legacy tenant catalog settings do not configure these resources. |
+| SSO/OIDC | Browser sign-in and admin step-up, discovery, verified signed tokens, issuer/audience/expiry/nonce checks, browser-bound state, PKCE, and expiring gateway sessions. |
 | Reports | JSON/CSV event exports labelled SOC2/HIPAA/GDPR; these are event summaries, not certifications or compliance assessments. |
 | Persistence | Roles/tenants in `dataDir/enterprise.db`; agent audit chain in `dataDir/audit.db`. Protect and back up this directory. |
 | Hardening | Validated IP allow-lists and rate limits cover admin and settings. Optional step-up requires fresh OIDC authentication. |
@@ -277,6 +292,11 @@ role through `/api/v1/admin/users/role` (omit `tenantId`). New SSO users are vie
 SSO sessions expire after one hour and on restart; they cannot mint persistent
 paired-device tokens.
 
+Browser login stores the session in the same-origin chat UI and opens the admin
+page for administrators. API clients receive JSON. The admin and settings UIs
+consume a stored step-up grant automatically; verify again before another
+protected mutation.
+
 A fresh admin login also returns a `stepUpToken`, valid for five minutes and one
 mutation. Send it as `X-Step-Up-Token` with that same user's bearer token. Enable
 `requireStepUp` **after** assigning your first OIDC admin using the bootstrap
@@ -295,7 +315,9 @@ a bearer token; pairing claim uses its short-lived code instead.
 | GET | `/api/v1/health` | HTTP liveness and feature information |
 | GET | `/api/v1/ready` | 200 when a backend is configured, 503 in echo mode; does not probe upstream availability |
 | POST | `/api/v1/message` | Send `{"text":"Hello"}` |
-| POST | `/api/v1/stream` | Stream an agent reply |
+| POST | `/api/v1/stream` | Forward actual response text; `done.reply` is the authoritative final answer |
+| GET/POST | `/api/v1/board` | List/create member workspaces |
+| GET/POST | `/api/v1/board/{workspace}/…` | Tasks, members, handoffs and integrations; [API](docs/collaboration.md) |
 | GET | `/api/v1/session` | Caller sessions |
 | GET / POST | `/api/v1/threads` | List/create threads |
 | GET / PATCH | `/api/v1/settings` | Inspect/update supported settings |
@@ -314,7 +336,11 @@ and `/api/v1/audit`. Configured enterprise SSO mounts `/api/v1/sso/login` and
 model or sidecar. Use the same `FATHOM_CONFIG` as your running agent. The audit
 API accepts `limit` from 0 to 10000. Audit writes are transactional; storage
 failures stop model/tool dispatch and admin mutations. Back up the database;
-there is no automatic retention policy. Hash chains detect edits within the
+daily maintenance retains 90 days of audit history and permanently purges chats
+30 days after deletion. Set `retention.auditDays` and
+`retention.deletedThreadDays` (0 disables; maximum 36500). A verified hash
+checkpoint anchors the retained audit suffix. Retention also runs at startup.
+Hash chains detect edits within the
 stored history, but cannot detect wholesale replacement by a privileged host
 administrator without an externally retained checkpoint.
 

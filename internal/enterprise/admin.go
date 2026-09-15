@@ -16,9 +16,10 @@ import (
 // hook. RBAC-gated for every action, with optional defense-in-depth layers
 // (IP allow-list, rate limit, step-up re-auth) configured via AdminConfig.
 type AdminAPI struct {
-	RBAC       *core.RBACManager
-	Tenants    *core.TenantManager
-	Compliance *core.Exporter
+	CreateAccount func(string) (string, string, error)
+	RBAC          *core.RBACManager
+	Tenants       *core.TenantManager
+	Compliance    *core.Exporter
 	// Audit accepts any security.Recorder so the same handler can be
 	// reused by fathom-gateway's admin surface with its own audit sink.
 	Audit security.Recorder
@@ -62,6 +63,33 @@ func (a *AdminAPI) Handle(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	switch {
+	case path == "/api/v1/admin/accounts" && r.Method == http.MethodPost:
+		if !a.requireManageUsers(w, userID, "create_account") {
+			return true
+		}
+		if !a.stepUpOK(r) {
+			respJSON(w, 403, map[string]string{"error": "Fresh identity verification required"})
+			return true
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if readJSON(r, &body) != nil || len(body.Name) == 0 || len(body.Name) > 100 {
+			respJSON(w, 400, map[string]string{"error": "Name required (maximum 100 characters)"})
+			return true
+		}
+		if a.CreateAccount == nil {
+			respJSON(w, 503, map[string]string{"error": "Account creation unavailable"})
+			return true
+		}
+		id, token, err := a.CreateAccount(body.Name)
+		if err != nil {
+			respJSON(w, 500, map[string]string{"error": "Could not create account"})
+			return true
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		a.audit(userID, "create_account", types.PolicyAllow, map[string]interface{}{"userId": id})
+		respJSON(w, 201, map[string]string{"userId": id, "token": token})
 	case path == "/api/v1/admin/users" && r.Method == http.MethodGet:
 		if !a.requireManageUsers(w, userID, "list_users") {
 			return true

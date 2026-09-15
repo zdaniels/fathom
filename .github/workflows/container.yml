@@ -20,6 +20,10 @@ jobs:
         run: go test -count=1 -run TestRequiredSandboxContainerBoundary ./internal/skills
       - name: Build container
         run: docker build -t fathom:test .
+      - name: Verify workspace execution isolation
+        env:
+          FATHOM_TEST_WORKSPACE_IMAGE: fathom:test
+        run: go test -race -count=1 -run TestWorkspaceContainers ./internal/collab
       - name: Smoke test deployment
         run: sh deploy/smoke.sh fathom:test
       - uses: azure/setup-helm@v4.3.0

@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-//go:embed index.html chat.css chat.js settings.html settings.css settings.js manifest.webmanifest sw.js icons
+//go:embed features.js board.html board.js admin.html admin.js team.css index.html chat.css chat.js settings.html settings.css settings.js manifest.webmanifest sw.js icons
 var assets embed.FS
 
 // menubar-icon.png is the same iceberg silhouette the Mac menubar app

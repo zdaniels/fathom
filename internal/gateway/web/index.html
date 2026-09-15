@@ -66,6 +66,7 @@
       <button type="button" class="btn-primary" id="pair-btn">Pair</button>
     </div>
     <div class="modal-pane" data-pane="token" hidden>
+      <p><a data-feature="sso" hidden href="api/v1/sso/login">Sign in with your organization</a></p>
       <input id="token-input" type="password" placeholder="Paste API token…" autocomplete="off" />
       <button type="button" class="btn-primary" id="token-btn">Connect</button>
     </div>
@@ -85,6 +86,8 @@
       <button class="drawer-item drawer-item-primary" id="new-session-btn">+ New chat</button>
       <div class="drawer-section-label">Conversations</div>
       <div class="thread-list" id="thread-list"></div>
+      <a class="drawer-item drawer-item-quiet" data-feature="admin" hidden href="admin">Team settings</a>
+      <a class="drawer-item drawer-item-quiet" href="board">Agent board</a>
       <a class="drawer-item drawer-item-quiet" id="settings-link" href="settings">Settings</a>
       <button class="drawer-item drawer-item-quiet" id="forget-device-btn">Forget this device</button>
       <div class="drawer-meta" id="drawer-meta"></div>
@@ -93,5 +96,6 @@
 </div>
 
 <script src="chat.js"></script>
+<script src="features.js"></script>
 </body>
 </html>

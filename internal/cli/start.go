@@ -70,6 +70,9 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 				cfgPath = args[0]
 			}
 			cfg := config.LoadConfig(cfgPath)
+			if err := validateRetention(cfg); err != nil {
+				return err
+			}
 
 			// Persistent device tokens — keeps paired phones / CLIs /
 			// browsers working across `fathom service restart`. Failure
@@ -164,6 +167,11 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 			if ent != nil {
 				defer ent.DB.Close()
 			}
+			board, err := mountBoard(gw, cfg, result, ent)
+			if err != nil {
+				return err
+			}
+			defer board.Close()
 			gw.SetReady(result.Ready)
 
 			// Scheduler — only fires when there's a real LLM behind the agent
@@ -213,6 +221,18 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 			if err := gw.Start(); err != nil {
 				return err
 			}
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = gw.Stop(ctx)
+			}()
+			maintenanceCtx, stopMaintenance := context.WithCancel(context.Background())
+			maintenanceDone := make(chan struct{})
+			go func() {
+				defer close(maintenanceDone)
+				runRetention(maintenanceCtx, cfg, result.Security.Audit, gw.Threads)
+			}()
+			defer func() { stopMaintenance(); <-maintenanceDone }()
 
 			// Optional Cloudflare Tunnel — exposes the gateway publicly.
 			// Refused unless at least one non-initial token exists, so
@@ -312,9 +332,9 @@ and encodes that IP in the QR. Works through NAT, no public surface.`,
 			if relayClient != nil {
 				relayClient.Stop()
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			return gw.Stop(ctx)
+			stopMaintenance()
+			<-maintenanceDone
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&cfgPath, "config", "", "Path to fathom.config.yaml")

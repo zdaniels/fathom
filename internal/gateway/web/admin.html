@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Fathom · Team settings</title>
+    <link rel="stylesheet" href="team.css" />
+  </head>
+  <body>
+    <header>
+      <a href="./">fathom</a>
+      <nav>
+        <a href="board">Agent board</a><a href="settings">Agent settings</a
+        ><a data-feature="sso" hidden href="api/v1/sso/login"
+          >Sign in / verify identity</a
+        >
+      </nav>
+    </header>
+    <main>
+      <h1>Team settings</h1>
+      <p>Manage the people who can work with agents on this instance.</p>
+      <p id="status" role="status"></p>
+      <section>
+        <h2>People</h2>
+        <div id="people"></div>
+        <form id="add-user">
+          <label
+            >User ID<input
+              id="user-id"
+              required
+              maxlength="512"
+              placeholder="User ID from a signed-in account" /></label
+          ><label
+            >Role<select id="user-role">
+              <option>viewer</option>
+              <option>operator</option>
+              <option>admin</option>
+            </select></label
+          ><button>Assign role</button>
+        </form>
+        <p class="muted">
+          Viewers can read their history. Operators can use agents. Admins
+          manage access and settings.
+        </p>
+      </section>
+      <section>
+        <h2>New teammate</h2>
+        <p>
+          Create an independent account and give its one-time credential to your
+          teammate privately. They can paste it into the chat sign-in screen.
+        </p>
+        <form id="invite">
+          <label>Name<input id="invite-name" required maxlength="100" /></label
+          ><button>Create account</button>
+        </form>
+        <output id="invite-result"></output>
+      </section>
+    </main>
+    <script src="admin.js"></script>
+    <script src="features.js"></script>
+  </body>
+</html>

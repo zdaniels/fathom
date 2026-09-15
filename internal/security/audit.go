@@ -58,7 +58,9 @@ func OpenAuditLogger(path string) (*AuditLogger, error) {
 	_, err = db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
  CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, record BLOB NOT NULL);
  CREATE TABLE IF NOT EXISTS audit_lock (id INTEGER PRIMARY KEY, value INTEGER NOT NULL);
- INSERT OR IGNORE INTO audit_lock VALUES(1,0);`)
+ INSERT OR IGNORE INTO audit_lock VALUES(1,0);
+ CREATE TABLE IF NOT EXISTS audit_checkpoint (id INTEGER PRIMARY KEY,hash TEXT NOT NULL,pruned INTEGER NOT NULL);
+ INSERT OR IGNORE INTO audit_checkpoint VALUES(1,'',0);`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -138,7 +140,12 @@ func (a *AuditLogger) Log(session, user string, action types.AuditAction, detail
 			a.err = err
 			return types.AuditEntry{}
 		}
-		if err == nil {
+		if err == sql.ErrNoRows {
+			if err = tx.QueryRow("SELECT hash FROM audit_checkpoint WHERE id=1").Scan(&e.PreviousHash); err != nil {
+				a.err = err
+				return types.AuditEntry{}
+			}
+		} else if err == nil {
 			var last types.AuditEntry
 			if err = json.Unmarshal(b, &last); err != nil {
 				a.err = err
@@ -223,11 +230,51 @@ func (a *AuditLogger) Snapshot() []types.AuditEntry {
 func (a *AuditLogger) VerifyChain() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	entries := a.snapshotLocked()
+	var entries []types.AuditEntry
+	prev := ""
 	if a.err != nil {
 		return false
 	}
-	prev := ""
+	if a.db != nil {
+		tx, err := a.db.Begin()
+		if err != nil {
+			a.err = err
+			return false
+		}
+		defer tx.Rollback()
+		if err = tx.QueryRow("SELECT hash FROM audit_checkpoint WHERE id=1").Scan(&prev); err != nil {
+			a.err = err
+			return false
+		}
+		rows, err := tx.Query("SELECT record FROM audit ORDER BY seq")
+		if err != nil {
+			a.err = err
+			return false
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var b []byte
+			var e types.AuditEntry
+			if err = rows.Scan(&b); err != nil {
+				a.err = err
+				return false
+			}
+			if err = json.Unmarshal(b, &e); err != nil {
+				a.err = err
+				return false
+			}
+			entries = append(entries, e)
+		}
+		if err = rows.Err(); err != nil {
+			a.err = err
+			return false
+		}
+	} else {
+		entries = a.snapshotLocked()
+		if a.err != nil {
+			return false
+		}
+	}
 	if a.db == nil && len(entries) > 0 {
 		prev = entries[0].PreviousHash
 	}

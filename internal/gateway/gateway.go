@@ -58,6 +58,12 @@ type ExtensionHandler func(w http.ResponseWriter, r *http.Request) bool
 
 // Gateway is the HTTP/WebSocket server. Single instance per process.
 type Gateway struct {
+	requestWG      sync.WaitGroup
+	stopping       bool
+	stopOnce       sync.Once
+	stopErr        error
+	cancelRequests context.CancelFunc
+
 	cfg      types.Config
 	Auth     *auth.Manager
 	Sessions *auth.SessionStore
@@ -76,7 +82,7 @@ type Gateway struct {
 	DeviceStore *auth.DeviceStore
 
 	server        *http.Server
-	mux           *http.ServeMux // exposed via Handler() for in-process dispatch (relay client)
+	mux           http.Handler // exposed via Handler() for in-process dispatch (relay client)
 	mu            sync.RWMutex
 	msgHandler    MessageHandler
 	msgHandlerN   MessageHandlerN
@@ -84,6 +90,7 @@ type Gateway struct {
 	router        ModelRegistry // optional: lets /models slash command list available models
 	audit         AuditRecorder // optional: pairing-flow audit hook
 	extensionHook ExtensionHandler
+	boardHandler  http.Handler
 
 	// Settings surface (/api/v1/settings). policyCtl lets the settings
 	// handler read + hot-swap the live policy; configPath/policyPath are
@@ -307,6 +314,16 @@ func (g *Gateway) SetExtensionHandler(h ExtensionHandler) {
 // Start binds and serves. Returns once the listener is up; serving runs in
 // a background goroutine.
 func (g *Gateway) Start() error {
+	listener, err := net.Listen("tcp", net.JoinHostPort(g.cfg.Host, fmt.Sprint(g.cfg.Port)))
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	started := false
+	defer func() {
+		if !started {
+			listener.Close()
+		}
+	}()
 	if !g.Auth.HasTokens() {
 		token, err := g.Auth.SetupInitialToken()
 		if err != nil {
@@ -348,13 +365,31 @@ func (g *Gateway) Start() error {
 	mux.HandleFunc("/", g.handleFallback)
 
 	addr := fmt.Sprintf("%s:%d", g.cfg.Host, g.cfg.Port)
+	requestCtx, cancelRequests := context.WithCancel(context.Background())
+	g.cancelRequests = cancelRequests
+	tracked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		if g.stopping {
+			g.mu.Unlock()
+			jsonError(w, 503, "gateway is stopping")
+			return
+		}
+		g.requestWG.Add(1)
+		g.mu.Unlock()
+		defer g.requestWG.Done()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		stop := context.AfterFunc(requestCtx, cancel)
+		defer stop()
+		mux.ServeHTTP(w, r.WithContext(ctx))
+	})
 	g.server = &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      tracked,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 	}
-	g.mux = mux
+	g.mux = tracked
 	g.cleanupTicker = time.NewTicker(60 * time.Second)
 	g.cleanupStop = make(chan struct{})
 	go func() {
@@ -368,10 +403,11 @@ func (g *Gateway) Start() error {
 		}
 	}()
 	go func() {
-		if err := g.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := g.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("gateway listener error", "err", err)
 		}
 	}()
+	started = true
 	slog.Info("Fathom gateway listening", "host", g.cfg.Host, "port", g.cfg.Port)
 	return nil
 }
@@ -379,26 +415,42 @@ func (g *Gateway) Start() error {
 // Stop shuts the gateway down, including the session-cleanup ticker
 // and the pairing-code sweeper.
 func (g *Gateway) Stop(ctx context.Context) error {
-	if g.cleanupTicker != nil {
-		g.cleanupTicker.Stop()
-		close(g.cleanupStop)
-	}
-	if g.Pairing != nil {
-		g.Pairing.Close()
-	}
-	if g.Threads != nil {
-		_ = g.Threads.Close()
-	}
-	if g.DeviceStore != nil {
-		_ = g.DeviceStore.Close()
-	}
-	if g.server != nil {
-		if err := g.server.Shutdown(ctx); err != nil {
-			return err
+	g.stopOnce.Do(func() {
+		g.mu.Lock()
+		g.stopping = true
+		g.mu.Unlock()
+		if g.cleanupTicker != nil {
+			g.cleanupTicker.Stop()
+			close(g.cleanupStop)
 		}
-	}
-	slog.Info("gateway stopped")
-	return nil
+		if g.ThreadHub != nil {
+			g.ThreadHub.Close()
+		}
+		if g.server != nil {
+			if err := g.server.Shutdown(ctx); err != nil {
+				g.stopErr = err
+				if g.cancelRequests != nil {
+					g.cancelRequests()
+				}
+				_ = g.server.Close()
+			}
+		}
+		g.requestWG.Wait()
+		if g.cancelRequests != nil {
+			g.cancelRequests()
+		}
+		if g.Pairing != nil {
+			g.Pairing.Close()
+		}
+		if g.Threads != nil {
+			_ = g.Threads.Close()
+		}
+		if g.DeviceStore != nil {
+			_ = g.DeviceStore.Close()
+		}
+		slog.Info("gateway stopped")
+	})
+	return g.stopErr
 }
 
 func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -420,7 +472,10 @@ func (g *Gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 		// computation — re-snapshotted on every call so a future
 		// admin-flip surface works without restart.
 		"features": map[string]bool{
-			"threads": g.Threads != nil,
+			"threads":       g.Threads != nil,
+			"collaboration": g.boardHandler != nil,
+			"admin":         g.cfg.Mode != types.ModePersonal,
+			"sso":           g.cfg.Mode == types.ModeEnterprise && g.cfg.Enterprise != nil && g.cfg.Enterprise.SSO != nil,
 		},
 	})
 }
@@ -510,10 +565,21 @@ func (g *Gateway) handleGetSession(w http.ResponseWriter, r *http.Request) {
 //     the PWA spec wants the manifest fetched live to pick up changes.
 //   - Anything else under our static surface → 404, doesn't fall through to
 //     a wildcard so we don't accidentally serve files we didn't intend to.
+func (g *Gateway) SetBoardHandler(h http.Handler) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.boardHandler = h
+}
+
 func (g *Gateway) handleFallback(w http.ResponseWriter, r *http.Request) {
 	g.mu.RLock()
 	hook := g.extensionHook
+	board := g.boardHandler
 	g.mu.RUnlock()
+	if (r.URL.Path == "/api/v1/board" || strings.HasPrefix(r.URL.Path, "/api/v1/board/")) && board != nil {
+		board.ServeHTTP(w, r)
+		return
+	}
 	if hook != nil && hook(w, r) {
 		return
 	}
@@ -522,6 +588,18 @@ func (g *Gateway) handleFallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Path
+	if path == "/admin" || path == "/admin.html" || path == "/board" || path == "/board.html" {
+		asset := "admin.html"
+		if strings.HasPrefix(path, "/board") {
+			asset = "board.html"
+		}
+		if data, ok := web.AssetBytes(asset); ok {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.Write(data)
+			return
+		}
+	}
 	// Root + legacy aliases all serve the index.
 	if path == "/" || path == "/chat" || path == "/chat.html" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

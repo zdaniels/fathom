@@ -68,8 +68,10 @@ func BuildTakeoverHandler(cfg types.Config) (func(ctx context.Context, msg types
 	return func(ctx context.Context, msg types.ChannelMessage, sess types.Session) (string, error) {
 		// REST and scheduled invocations are independent, one-shot requests.
 		state := &conversation{gate: make(chan struct{}, 1)}
+		persistentPath := ""
 		if msg.ChannelID != "" && msg.ChannelType != "rest" && msg.ChannelType != "scheduler" {
 			key := conversationKey{sess.UserID, msg.ChannelType, msg.ChannelID}
+			persistentPath = resumePath(cfg.DataDir, provider, model, builtin.WorkspaceRoot(), sess.UserID, msg.ChannelType, msg.ChannelID)
 			mu.Lock()
 			if existing := sessions[key]; existing != nil {
 				state = existing
@@ -85,6 +87,13 @@ func BuildTakeoverHandler(cfg types.Config) (func(ctx context.Context, msg types
 			return "", ctx.Err()
 		}
 		defer func() { <-state.gate }()
+		if persistentPath != "" {
+			resume, err := loadResume(persistentPath)
+			if err != nil {
+				return "", err
+			}
+			state.resume = resume
+		}
 
 		run, err := builtin.RunCodingAgent(ctx, spec, builtin.CodingAgentOptions{
 			Prompt:          msg.Text,
@@ -98,6 +107,9 @@ func BuildTakeoverHandler(cfg types.Config) (func(ctx context.Context, msg types
 		}
 		if run.SessionID != "" {
 			state.resume = run.SessionID
+			if err := saveResume(persistentPath, run.SessionID); err != nil {
+				return "", fmt.Errorf("save conversation continuity: %w", err)
+			}
 		}
 		return run.Result, nil
 	}, nil

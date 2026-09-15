@@ -597,3 +597,5 @@ a.drawer-item { display: block; text-decoration: none; }
   line-height: 1.6;
   word-break: break-all;
 }
+
+.live-response{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:50vh;overflow:auto}

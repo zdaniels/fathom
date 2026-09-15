@@ -92,6 +92,12 @@ Multi-component changes: one logical change per commit when reasonable.
 A "rename + reorganise + bugfix" commit is harder to review and
 review than three smaller ones.
 
+## Change cadence
+
+Prefer small, focused follow-up PRs: one concrete fix or usable feature increment
+per PR, with its tests and documentation. Use logical commits that a reviewer can
+understand independently. Keep the main branch usable between increments.
+
 ## Pull request checklist
 
 Before opening a PR:

@@ -238,10 +238,11 @@ func (l *Loop) processWithProviderInner(ctx context.Context, msg types.ChannelMe
 
 		var resp llm.Response
 		var err error
+		modelCtx, flushText := l.mesh.Canary.FilterStream(ctx)
 		if len(toolDefs) > 0 {
-			resp, err = provider.Chat(ctx, messages, toolDefs)
+			resp, err = provider.Chat(modelCtx, messages, toolDefs)
 		} else {
-			resp, err = provider.Chat(ctx, messages, nil)
+			resp, err = provider.Chat(modelCtx, messages, nil)
 		}
 		if err != nil {
 			llmSpan.SetError(err.Error()).End()
@@ -249,6 +250,7 @@ func (l *Loop) processWithProviderInner(ctx context.Context, msg types.ChannelMe
 			root.SetError(err.Error())
 			return "", err
 		}
+		flushText()
 		llmSpan.SetAttr("finish.reason", string(resp.FinishReason)).
 			SetAttr("tool.calls", len(resp.ToolCalls))
 		if resp.Usage != nil {

@@ -151,27 +151,46 @@ type ProfileConfig struct {
 }
 
 // Config is the top-level configuration loaded from fathom.config.yaml.
+type RetentionConfig struct {
+	AuditDays         int `yaml:"auditDays" json:"auditDays"`
+	DeletedThreadDays int `yaml:"deletedThreadDays" json:"deletedThreadDays"`
+}
+
+type TaskConnection struct {
+	WorkspaceID string `yaml:"workspaceId" json:"workspaceId"`
+	Provider    string `yaml:"provider" json:"provider"`
+	TokenSecret string `yaml:"tokenSecret" json:"-"`
+	Site        string `yaml:"site,omitempty" json:"site,omitempty"`
+	Email       string `yaml:"email,omitempty" json:"-"`
+	Scope       string `yaml:"scope" json:"scope"`
+}
+type CollaborationConfig struct {
+	Image       string           `yaml:"image" json:"image"`
+	Connections []TaskConnection `yaml:"connections,omitempty" json:"-"`
+}
 type Config struct {
-	ConfigPath   string              `json:"-" yaml:"-"` // Absolute source path, retained for settings and policy resolution.
-	Mode         Mode                `yaml:"mode"`
-	Profile      Profile             `yaml:"profile,omitempty"` // "" = default, "minimal" = lean
-	Host         string              `yaml:"host"`
-	Port         int                 `yaml:"port"`
-	Auth         AuthConfig          `yaml:"auth"`
-	LLM          LLMConfig           `yaml:"llm"`
-	Routing      *RoutingConfig      `yaml:"routing,omitempty"`
-	Egress       *EgressConfig       `yaml:"egress,omitempty"`
-	Skills       *SkillsConfig       `yaml:"skills,omitempty"`
-	Telemetry    *TelemetryConfig    `yaml:"telemetry,omitempty"`
-	DataDir      string              `yaml:"dataDir"`
-	PolicyFile   string              `yaml:"policyFile"`
-	LogLevel     string              `yaml:"logLevel"`
-	Enterprise   *EnterpriseBlock    `yaml:"enterprise,omitempty"`
-	SubAgents    *SubAgentsConfig    `yaml:"subAgents,omitempty"`
-	Swarm        *SwarmConfig        `yaml:"swarm,omitempty"`
-	ClaudeCode   *ClaudeCodeConfig   `yaml:"claudeCode,omitempty"`
-	Takeover     *TakeoverConfig     `yaml:"takeover,omitempty"`
-	Integrations *IntegrationsConfig `yaml:"integrations,omitempty"`
+	Collaboration *CollaborationConfig `yaml:"collaboration,omitempty" json:"collaboration,omitempty"`
+	Retention     *RetentionConfig     `yaml:"retention,omitempty" json:"retention,omitempty"`
+	ConfigPath    string               `json:"-" yaml:"-"` // Absolute source path, retained for settings and policy resolution.
+	Mode          Mode                 `yaml:"mode"`
+	Profile       Profile              `yaml:"profile,omitempty"` // "" = default, "minimal" = lean
+	Host          string               `yaml:"host"`
+	Port          int                  `yaml:"port"`
+	Auth          AuthConfig           `yaml:"auth"`
+	LLM           LLMConfig            `yaml:"llm"`
+	Routing       *RoutingConfig       `yaml:"routing,omitempty"`
+	Egress        *EgressConfig        `yaml:"egress,omitempty"`
+	Skills        *SkillsConfig        `yaml:"skills,omitempty"`
+	Telemetry     *TelemetryConfig     `yaml:"telemetry,omitempty"`
+	DataDir       string               `yaml:"dataDir"`
+	PolicyFile    string               `yaml:"policyFile"`
+	LogLevel      string               `yaml:"logLevel"`
+	Enterprise    *EnterpriseBlock     `yaml:"enterprise,omitempty"`
+	SubAgents     *SubAgentsConfig     `yaml:"subAgents,omitempty"`
+	Swarm         *SwarmConfig         `yaml:"swarm,omitempty"`
+	ClaudeCode    *ClaudeCodeConfig    `yaml:"claudeCode,omitempty"`
+	Takeover      *TakeoverConfig      `yaml:"takeover,omitempty"`
+	Integrations  *IntegrationsConfig  `yaml:"integrations,omitempty"`
 }
 
 // SubAgentsConfig gates the `delegate` tool, which lets the main agent

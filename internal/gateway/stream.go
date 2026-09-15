@@ -1,48 +1,16 @@
-// Gateway HTTP handler for /api/v1/stream — Server-Sent Events delivery
-// of agent responses.
-//
-// **Honest note on v1 implementation:** real per-token streaming
-// requires upstream changes to the llm.Provider interface (a Stream
-// method on each of OpenAI / Anthropic / Ollama; all three providers'
-// APIs natively support it, our wrapper just doesn't expose it yet).
-// That's its own focused PR.
-//
-// For now this endpoint waits for the full agent reply from the existing
-// handler, then chunks it across the wire so the mobile UI's streaming
-// code path works end-to-end. Once provider-side streaming lands, only
-// this file changes — the mobile UI is already consuming token deltas.
-//
-// Format: standard SSE, one JSON object per `data:` line:
-//
-//	data: {"delta": "next chunk"}\n\n
-//	data: {"delta": "another chunk"}\n\n
-//	event: done\n
-//	data: {"usage":{"prompt":12,"completion":34}}\n\n
-//
-// Or on error mid-stream:
-//
-//	event: error\n
-//	data: {"error":"…"}\n\n
+// Agent responses over SSE, forwarding provider text as it arrives.
 package gateway
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/zdaniels/fathom/internal/streamtext"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/zdaniels/fathom/pkg/types"
 )
-
-// chunkPause is the inter-chunk delay for the fake-stream path. Short
-// enough to feel responsive, long enough that the typing effect is
-// visible on mobile.
-const chunkPause = 25 * time.Millisecond
-
-// chunkSize is roughly one "word group" — pick what looks natural in
-// the mobile UI. We chunk on word boundaries when possible.
-const chunkSize = 12
 
 func (g *Gateway) handleStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -105,30 +73,27 @@ func (g *Gateway) handleStream(w http.ResponseWriter, r *http.Request) {
 		Timestamp:   time.Now().UTC(),
 	}
 
-	reply, err := handler(r.Context(), msg, sess)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	flusher.Flush()
+	emitted := false
+	ctx := streamtext.With(r.Context(), func(delta string) {
+		emitted = true
+		writeSSEEvent(w, "message", map[string]string{"delta": delta})
+		flusher.Flush()
+	})
+	reply, err := handler(ctx, msg, sess)
 	if err != nil {
 		writeSSEEvent(w, "error", map[string]string{"error": err.Error()})
 		flusher.Flush()
 		return
 	}
 
-	// Chunk the reply and emit. Chunks split on whitespace when possible
-	// to avoid breaking mid-word — looks cleaner in the mobile UI as
-	// the bubble grows.
-	chunks := chunkText(reply, chunkSize)
-	for _, c := range chunks {
-		// Bail if the client went away.
-		select {
-		case <-r.Context().Done():
-			return
-		default:
-		}
-		writeSSEEvent(w, "message", map[string]string{"delta": c})
-		flusher.Flush()
-		time.Sleep(chunkPause)
+	if !emitted {
+		writeSSEEvent(w, "message", map[string]string{"delta": reply})
 	}
 	writeSSEEvent(w, "done", map[string]interface{}{
 		"session_id": sess.ID,
+		"reply":      reply,
 	})
 	flusher.Flush()
 }
@@ -144,41 +109,4 @@ func writeSSEEvent(w io.Writer, event string, data interface{}) {
 		_, _ = fmt.Fprintf(w, "event: %s\n", event)
 	}
 	_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
-}
-
-// chunkText splits text into chunks of roughly `target` runes, breaking
-// on whitespace when possible so words stay intact. The mobile UI's
-// markdown renderer can handle partial markdown sequences across
-// chunks (it re-renders from the full accumulated buffer on each delta).
-func chunkText(text string, target int) []string {
-	if len(text) <= target {
-		return []string{text}
-	}
-	var out []string
-	runes := []rune(text)
-	i := 0
-	for i < len(runes) {
-		end := i + target
-		if end >= len(runes) {
-			out = append(out, string(runes[i:]))
-			break
-		}
-		// Walk back to the last whitespace within the target window
-		// so we don't split a word. Cap the walkback at half-target
-		// to avoid producing tiny chunks when whitespace is sparse.
-		split := end
-		for split > i+target/2 && !isSpaceRune(runes[split]) {
-			split--
-		}
-		if split <= i+target/2 {
-			split = end // no good whitespace — split mid-word
-		}
-		out = append(out, string(runes[i:split]))
-		i = split
-	}
-	return out
-}
-
-func isSpaceRune(r rune) bool {
-	return r == ' ' || r == '\n' || r == '\t' || r == '\r'
 }
