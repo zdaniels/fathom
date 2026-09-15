@@ -94,6 +94,27 @@ func (r *RBACManager) AssignRole(userID string, role Role, assignedBy, tenantID 
 	return nil
 }
 
+// EnsureUser records a first login without overwriting a concurrently granted
+// role. The database uniqueness constraint is the cross-process arbiter.
+func (r *RBACManager) EnsureUser(user string) error {
+	if err := validAssignment(user, RoleViewer, ""); err != nil {
+		return err
+	}
+	a := Assignment{UserID: user, Role: RoleViewer, AssignedBy: "sso", AssignedAt: time.Now().UTC()}
+	if r.db != nil {
+		b, _ := json.Marshal(a)
+		_, err := r.db.Exec("INSERT OR IGNORE INTO roles VALUES(?,?,?)", user, "", b)
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := keyFor(user, "")
+	if _, ok := r.assignments[key]; !ok {
+		r.assignments[key] = a
+	}
+	return nil
+}
+
 // RemoveRole drops the assignment.
 func (r *RBACManager) RemoveRole(userID, tenantID string) bool {
 	if r.db != nil {

@@ -171,7 +171,16 @@ func serviceInstallCmd() *cobra.Command {
 			}
 
 			plist := renderPlist(binPath, absWorkdir, logPath, cfgPath)
-			if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
+			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				return err
+			}
+			if err = logFile.Chmod(0600); err != nil {
+				logFile.Close()
+				return err
+			}
+			logFile.Close()
+			if err := os.WriteFile(plistPath, []byte(plist), 0o600); err != nil {
 				return err
 			}
 
@@ -181,14 +190,16 @@ func serviceInstallCmd() *cobra.Command {
 			// its error.
 			uid := strconv.Itoa(os.Getuid())
 			_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+launchdLabel).Run()
-			if err := exec.Command("launchctl", "bootstrap", "gui/"+uid, plistPath).Run(); err != nil {
-				return fmt.Errorf("launchctl bootstrap: %w (run `launchctl error <code>` for detail)", err)
+			if output, err := exec.Command("launchctl", "enable", "gui/"+uid+"/"+launchdLabel).CombinedOutput(); err != nil {
+				return fmt.Errorf("launchctl enable: %w: %s", err, strings.TrimSpace(string(output)))
 			}
-			// Kickstart to start it immediately (otherwise RunAtLoad only
-			// fires on next login).
-			if err := exec.Command("launchctl", "kickstart", "-k", "gui/"+uid+"/"+launchdLabel).Run(); err != nil {
-				// Non-fatal — bootstrap succeeded; next login will pick it up.
-				_ = err
+			if output, err := exec.Command("launchctl", "bootstrap", "gui/"+uid, plistPath).CombinedOutput(); err != nil {
+				return fmt.Errorf("launchctl bootstrap: %w: %s", err, strings.TrimSpace(string(output)))
+			}
+			// Bootstrap starts RunAtLoad jobs. A plain kickstart is idempotent;
+			// -k would kill a gateway that just started successfully.
+			if output, err := exec.Command("launchctl", "kickstart", "gui/"+uid+"/"+launchdLabel).CombinedOutput(); err != nil {
+				return fmt.Errorf("launchctl kickstart: %w: %s", err, strings.TrimSpace(string(output)))
 			}
 
 			ui.SectionHeader(out, ui.Success("Service installed"))

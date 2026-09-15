@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/zdaniels/fathom/internal/streamtext"
 	"github.com/zdaniels/fathom/pkg/types"
 )
 
@@ -94,9 +95,12 @@ func (a *Anthropic) Chat(ctx context.Context, messages []Message, tools []ToolDe
 		body["tools"] = atools
 	}
 
+	if streamtext.Enabled(ctx) {
+		body["stream"] = true
+	}
 	buf, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.anthropic.com/v1/messages", bytes.NewReader(buf))
+		withDefaultBase(a.cfg, "https://api.anthropic.com/v1").BaseURL+"/messages", bytes.NewReader(buf))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", a.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -105,6 +109,9 @@ func (a *Anthropic) Chat(ctx context.Context, messages []Message, tools []ToolDe
 		return Response{}, &ProviderError{Provider: "anthropic", Msg: "request failed", Err: err}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK && streamtext.Enabled(ctx) {
+		return anthropicStream(ctx, resp.Body)
+	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
 	if resp.StatusCode != http.StatusOK {
 		return Response{}, &ProviderError{Provider: "anthropic",

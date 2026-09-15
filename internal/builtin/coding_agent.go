@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/zdaniels/fathom/internal/streamtext"
 	"os"
 	"os/exec"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 
 // CodingAgentOptions configures one headless run.
 type CodingAgentOptions struct {
+	stream          bool
 	Prompt          string        // the task / message
 	Model           string        // "" → the CLI's default for the account
 	WorkDir         string        // directory to run in
@@ -106,6 +108,7 @@ func RunCodingAgent(ctx context.Context, spec CodingAgentSpec, opts CodingAgentO
 		_ = f.Close()
 		defer os.Remove(opts.outFile)
 	}
+	opts.stream = spec.Name == "Claude Code" && streamtext.Enabled(ctx)
 	args := spec.BuildArgs(opts)
 	if !spec.PromptViaStdin {
 		args = append(args, opts.Prompt)
@@ -122,8 +125,20 @@ func RunCodingAgent(ctx context.Context, spec CodingAgentSpec, opts CodingAgentO
 	var stdout, stderr bytes.Buffer
 	c.Stdout = &stdout
 	c.Stderr = &stderr
-
+	var live *claudeStreamWriter
+	if opts.stream {
+		live = &claudeStreamWriter{ctx: ctx}
+		c.Stdout = live
+	}
+	c.WaitDelay = 2 * time.Second
 	runErr := c.Run()
+	if live != nil {
+		if len(bytes.TrimSpace(live.pending)) > 0 {
+			_, _ = live.Write([]byte("\n"))
+		}
+		stdout.Reset()
+		stdout.Write(live.result)
+	}
 	if cctx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("%s: timed out after %s", spec.Name, timeout)
 	}
@@ -166,6 +181,10 @@ func ClaudeCodeSpec() CodingAgentSpec {
 				maxTurns = 30
 			}
 			args := []string{"-p", "--output-format", "json", "--permission-mode", "acceptEdits", "--max-turns", strconv.Itoa(maxTurns)}
+			if o.stream {
+				args[2] = "stream-json"
+				args = append(args, "--verbose", "--include-partial-messages")
+			}
 			if o.Model != "" {
 				args = append(args, "--model", o.Model)
 			}
@@ -179,6 +198,9 @@ func ClaudeCodeSpec() CodingAgentSpec {
 }
 
 func parseClaudeResult(_ CodingAgentOptions, stdout, stderr []byte, runErr error) (*CodingAgentRun, error) {
+	if runErr != nil {
+		return nil, fmt.Errorf("claude_code failed: %w", runErr)
+	}
 	var res struct {
 		Subtype      string  `json:"subtype"`
 		IsError      bool    `json:"is_error"`
@@ -218,8 +240,7 @@ func parseClaudeResult(_ CodingAgentOptions, stdout, stderr []byte, runErr error
 //     far cleaner than scraping the JSONL event stream off stdout.
 //   - strips OPENAI_API_KEY so it uses the `codex login` (ChatGPT) session.
 //
-// Codex's resume is a subcommand (`codex exec resume <id>`) and doesn't hand
-// back an id here, so takeover threads are stateless per message with Codex.
+// JSONL thread.started events provide the explicit session ID for durable resume.
 func CodexSpec() CodingAgentSpec {
 	return CodingAgentSpec{
 		Name:             "OpenAI Codex",
@@ -228,19 +249,34 @@ func CodexSpec() CodingAgentSpec {
 		UsesOutputFile:   true,
 		StripEnvPrefixes: []string{"OPENAI_API_KEY="},
 		BuildArgs: func(o CodingAgentOptions) []string {
-			args := []string{
-				"exec",
-				"--skip-git-repo-check",
-				"--sandbox", "workspace-write",
-				"--output-last-message", o.outFile,
+			args := []string{"exec", "--sandbox", "workspace-write"}
+			if o.ResumeSessionID != "" {
+				args = append(args, "resume")
 			}
+			args = append(args, "--json", "--skip-git-repo-check", "--output-last-message", o.outFile)
 			if o.Model != "" {
 				args = append(args, "--model", o.Model)
+			}
+			if o.ResumeSessionID != "" {
+				args = append(args, o.ResumeSessionID)
 			}
 			return args
 		},
 		Parse: func(o CodingAgentOptions, stdout, stderr []byte, runErr error) (*CodingAgentRun, error) {
-			// The final message lands in the output file; fall back to stdout.
+			if runErr != nil {
+				return nil, fmt.Errorf("codex failed: %w", runErr)
+			}
+			sessionID := o.ResumeSessionID
+			for _, line := range bytes.Split(stdout, []byte("\n")) {
+				var e struct {
+					Type     string
+					ThreadID string `json:"thread_id"`
+				}
+				if json.Unmarshal(line, &e) == nil && e.Type == "thread.started" && e.ThreadID != "" {
+					sessionID = e.ThreadID
+				}
+			}
+			// The final message lands in the output file.
 			final := ""
 			if o.outFile != "" {
 				if b, err := os.ReadFile(o.outFile); err == nil {
@@ -257,7 +293,7 @@ func CodexSpec() CodingAgentSpec {
 				}
 				return nil, fmt.Errorf("codex produced no output: %s", trunc(detail, 2000))
 			}
-			return &CodingAgentRun{Result: final}, nil
+			return &CodingAgentRun{Result: final, SessionID: sessionID}, nil
 		},
 	}
 }

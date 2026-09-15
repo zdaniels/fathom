@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/zdaniels/fathom/internal/streamtext"
 	"github.com/zdaniels/fathom/pkg/types"
 )
 
@@ -100,6 +101,9 @@ func (o *Ollama) Chat(ctx context.Context, messages []Message, tools []ToolDef) 
 		body["tools"] = ot
 	}
 
+	if streamtext.Enabled(ctx) {
+		body["stream"] = true
+	}
 	buf, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/chat", bytes.NewReader(buf))
 	req.Header.Set("Content-Type", "application/json")
@@ -108,6 +112,9 @@ func (o *Ollama) Chat(ctx context.Context, messages []Message, tools []ToolDef) 
 		return Response{}, &ProviderError{Provider: "ollama", Msg: "request failed", Err: err}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK && streamtext.Enabled(ctx) {
+		return ollamaStream(ctx, resp.Body, tools)
+	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
 	if resp.StatusCode != http.StatusOK {
 		return Response{}, &ProviderError{Provider: "ollama",
